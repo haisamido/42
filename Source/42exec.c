@@ -16,6 +16,10 @@
 #include "42.h"
 #undef DECLARE_GLOBALS
 
+#ifndef __WASM__
+   #include <time.h>
+#endif
+
 /* #ifdef __cplusplus
 ** namespace _42 {
 ** using namespace Kit;
@@ -106,6 +110,7 @@ long AdvanceTime(void)
 
             break;
          case REAL_TIME :
+#ifndef __WASM__
             if (DTSIM < 1.0) {
                SleepDuration.tv_sec = (time_t) 0.0;
                SleepDuration.tv_nsec = (long) (1.0E9*DTSIM);
@@ -115,6 +120,10 @@ long AdvanceTime(void)
                SleepDuration.tv_nsec = (long) (1.0E9*(DTSIM-floor(DTSIM)));
             }
             nanosleep(&SleepDuration,NULL);
+#else
+            /* WebAssembly: sleep not supported, timing handled by browser event loop */
+            /* Use emscripten_sleep if needed, but typically run in FAST_TIME mode */
+#endif
             SimTime += DTSIM;
             itime = (long) ((SimTime+0.5*DTSIM)/(DTSIM));
             SimTime = ((double) itime)*DTSIM;

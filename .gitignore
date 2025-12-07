@@ -9,3 +9,7 @@ a.out
 *.ipynb
 42
 *.ipynb_checkpoints
+42.js
+42.Model
+42.wasm
+

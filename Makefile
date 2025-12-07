@@ -20,6 +20,7 @@ ifeq ($(AUTOPLATFORM),Failed)
    # Autodetect failed.  Set platform manually.
    #42PLATFORM = __APPLE__
    #42PLATFORM = __linux__
+   #42PLATFORM = __WASM__
    42PLATFORM = __MSYS__
 endif
 
@@ -169,10 +170,34 @@ ifeq ($(42PLATFORM),__MSYS__)
       LFLAGS =
       ARCHFLAG =
    endif
-   NOS3OBJ = 
-   XWARN = 
+   NOS3OBJ =
+   XWARN =
    EXENAME = 42.exe
    CC = gcc
+endif
+
+ifeq ($(42PLATFORM),__WASM__)
+   # WebAssembly Macros
+   CINC =
+   EXTERNDIR =
+   ARCHFLAG = -D __WASM__
+
+   # Disable GUI for WebAssembly (can enable with WebGL later)
+   GUIOBJ =
+   GLINC =
+   LIBS =
+   LFLAGS =
+
+   NOS3OBJ =
+   XWARN = -Wno-unused-variable
+   EXENAME = 42.js
+   CC = emcc
+   # Emscripten-specific flags
+   EMFLAGS = -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME="Module42" \
+             -s EXPORTED_FUNCTIONS='["_main"]' -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
+             -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB \
+             -s INVOKE_RUN=0 \
+             --preload-file Model@/Model --use-preload-plugins
 endif
 
 # If not using GUI, don't compile GUI-related files
@@ -241,7 +266,13 @@ CFLAGS = -std=c11 -g -O0 -fpic -Wall -Wshadow -Wno-deprecated $(XWARN) $(ANSIFLA
 ##########################  Rules to link 42  #############################
 
 42 : $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ)
+ifeq ($(42PLATFORM),__WASM__)
+	$(CC) $(CFLAGS) $(LFLAGS) $(GMSECBIN) $(EMFLAGS) -o $(EXENAME) $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ) $(LIBS)
+	@if [ -f 42.data ]; then mv 42.data 42.Model; fi
+	@sed -i.bak "s/42\.data/42.Model/g" 42.js && rm -f 42.js.bak
+else
 	$(CC) $(LFLAGS) $(GMSECBIN) -o $(EXENAME) $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ) $(LIBS)
+endif
 
 AcApp : $(OBJ)AcApp.o $(ACKITOBJ) $(ACIPCOBJ) $(GMSECOBJ)
 	$(CC) $(LFLAGS) -o AcApp $(OBJ)AcApp.o $(ACKITOBJ) $(ACIPCOBJ) $(GMSECOBJ) $(LIBS)
@@ -407,13 +438,41 @@ $(OBJ)42nos3.o         : $(SRC)42nos3.c
 
 
 ########################  Miscellaneous Rules  ############################
+
+# WebAssembly HTTP server port
+WEB_PORT = 8000
+
+# WebAssembly build target - explicitly set platform and disable GUI
+wasm :
+	$(MAKE) clean
+	$(MAKE) 42 42PLATFORM=__WASM__ GUIFLAG=
+
+# Start WebAssembly HTTP server
+web-up :
+	@echo "Starting HTTP server on http://localhost:$(WEB_PORT)"
+	@echo "Open http://localhost:$(WEB_PORT)/42.html in your browser"
+	@python3 -m http.server $(WEB_PORT) > /dev/null 2>&1 & echo "Server started with PID $$!"
+	@echo "Run 'make web-down' to stop the server"
+
+# Stop WebAssembly HTTP server
+web-down :
+	@echo "Checking for HTTP server on port $(WEB_PORT)..."
+	@PID=$$(lsof -ti:$(WEB_PORT) 2>/dev/null); \
+	if [ -n "$$PID" ]; then \
+		echo "Found server with PID $$PID"; \
+		kill -9 $$PID 2>/dev/null && echo "Server stopped (PID $$PID)"; \
+	else \
+		echo "No server running on port $(WEB_PORT)"; \
+	fi
+
 clean :
 ifeq ($(42PLATFORM),_WIN32)
 	del .\Object\*.o .\$(EXENAME) .\InOut\*.42
 else ifeq ($(42PLATFORM),_WIN64)
 	del .\Object\*.o .\$(EXENAME) .\InOut\*.42
 else
-	rm -f $(OBJ)*.o ./$(EXENAME) ./AcApp $(KITDIR)42kit.so 
+	rm -f $(OBJ)*.o ./$(EXENAME) ./AcApp $(KITDIR)42kit.so
+	rm -f ./42 ./42.wasm ./42.js ./42.wasm.map ./42.Model
 	rm -f $(INOUT)*.42 ./Standalone/*.42 ./Demo/*.42 ./Rx/*.42 ./Tx/*.42 ./Rover/*.42
 	rm -f $(INOUT)*.csv ./Standalone/*.csv ./Demo/*.csv ./Rx/*.csv ./Tx/*.csv ./Rover/*.csv
 endif

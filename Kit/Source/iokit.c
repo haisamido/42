@@ -50,6 +50,39 @@ void ByteSwapDouble(double *A)
 int FileToString(const char *file_name, char **result_string,
                  size_t *string_len)
 {
+#if defined(__WASM__)
+      /* Use stdio instead of POSIX file operations for WASM */
+      FILE *file;
+      size_t file_len;
+      size_t ret;
+
+      *string_len = 0;
+      file = fopen(file_name, "rb");
+      if (file == NULL) {
+          printf("Error opening file %s\n", file_name);
+          return -1;
+      }
+
+      /* Get file size */
+      fseek(file, 0, SEEK_END);
+      file_len = ftell(file);
+      fseek(file, 0, SEEK_SET);
+
+      *result_string = (char *) calloc(file_len + 1, sizeof(char));
+      ret = fread(*result_string, 1, file_len, file);
+      if (ret != file_len) {
+          printf("Error reading from file %s\n", file_name);
+          fclose(file);
+          return -1;
+      }
+      (*result_string)[ret] = '\0';
+
+      fclose(file);
+
+      *string_len = file_len;
+      return 0;
+
+#else
       int fd;
       size_t file_len;
       struct stat file_status;
@@ -85,6 +118,7 @@ int FileToString(const char *file_name, char **result_string,
 
       *string_len = file_len;
       return 0;
+#endif
 }
 /**********************************************************************/
 double *PpmToPsf(const char *path, const char *filename, 
@@ -120,7 +154,14 @@ double *PpmToPsf(const char *path, const char *filename,
 /**********************************************************************/
 SOCKET InitSocketServer(int Port, int AllowBlocking)
 {
-#if defined(_WIN32)
+#if defined(__WASM__)
+   /* WebAssembly doesn't support traditional sockets */
+   /* Use WebSockets via JavaScript interop instead */
+   printf("Warning: Socket operations not supported in WebAssembly build.\n");
+   printf("Use WebSockets via JavaScript for network communication.\n");
+   return -1;
+
+#elif defined(_WIN32)
 
       WSADATA wsa;
       SOCKET init_sockfd,sockfd;
@@ -228,7 +269,14 @@ SOCKET InitSocketServer(int Port, int AllowBlocking)
 /**********************************************************************/
 SOCKET InitSocketClient(const char *hostname, int Port,int AllowBlocking)
 {
-#if defined(_WIN32)
+#if defined(__WASM__)
+   /* WebAssembly doesn't support traditional sockets */
+   /* Use WebSockets via JavaScript interop instead */
+   printf("Warning: Socket operations not supported in WebAssembly build.\n");
+   printf("Use WebSockets via JavaScript for network communication.\n");
+   return -1;
+
+#elif defined(_WIN32)
 
       WSADATA wsa; /* winsock */
       SOCKET sockfd;

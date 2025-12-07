@@ -326,6 +326,18 @@ double usec(void)
 
       gettimeofday(&now,NULL);
       return(1.0E6*now.tv_sec+now.tv_usec);
+#elif defined(__WASM__)
+      /* WebAssembly: Use emscripten_get_now() or return simulated time */
+      /* Return milliseconds * 1000 to get microseconds */
+      #ifdef __EMSCRIPTEN__
+         #include <emscripten.h>
+         return(emscripten_get_now() * 1000.0);
+      #else
+         /* Fallback: return 0 for WASM without emscripten */
+         static double wasm_time = 0.0;
+         wasm_time += 1000.0; /* Increment by 1ms */
+         return(wasm_time);
+      #endif
 #else
       #error "This OS not supported by usec function"
       printf("This OS not supported by usec function.  Bailing out.\n");
@@ -351,6 +363,13 @@ void RealSystemTime(long *Year, long *DOY, long *Month, long *Day,
       Time = UnixTime - 946728000.0;
 
       TimeToDate(Time,Year,Month,Day,Hour,Minute,Second,DT);
+      *DOY = MD2DOY(*Year,*Month,*Day);
+#elif defined(__WASM__)
+      /* WebAssembly: Use current time from JS or simulation time */
+      /* For now, use a fixed epoch time (can be set via JS) */
+      static double WasmTime = 0.0;
+      WasmTime += DT; /* Increment by timestep */
+      TimeToDate(WasmTime,Year,Month,Day,Hour,Minute,Second,DT);
       *DOY = MD2DOY(*Year,*Month,*Day);
 #endif
 }
@@ -380,6 +399,23 @@ double RealRunTime(double *RealTimeDT, double LSB)
 #elif (defined(__APPLE__) || defined(__linux__))
 
       static double OldSysTime;
+      double SysTime;
+      long Year,DOY,Month,Day,Hour,Minute;
+      double Second;
+
+      if (First) {
+         First = 0;
+         RealSystemTime(&Year,&DOY,&Month,&Day,&Hour,&Minute,&Second,LSB);
+         OldSysTime = DateToTime(Year,Month,Day,Hour,Minute,Second);
+      }
+
+      RealSystemTime(&Year,&DOY,&Month,&Day,&Hour,&Minute,&Second,LSB);
+      SysTime = DateToTime(Year,Month,Day,Hour,Minute,Second);
+      *RealTimeDT = SysTime-OldSysTime;
+      OldSysTime = SysTime;
+#elif defined(__WASM__)
+      /* WebAssembly: Use simulated time */
+      static double OldSysTime = 0.0;
       double SysTime;
       long Year,DOY,Month,Day,Hour,Minute;
       double Second;

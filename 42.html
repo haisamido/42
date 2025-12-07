@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>42 Spacecraft Dynamics Simulator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 10px;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .status-loading {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status-ready {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0052a3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #output {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .file-upload {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 2px dashed #ccc;
+        }
+        .file-upload:hover {
+            border-color: #0066cc;
+        }
+        input[type="file"] {
+            margin-top: 10px;
+        }
+        .info {
+            background-color: #e7f3ff;
+            padding: 15px;
+            border-left: 4px solid #0066cc;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .info h3 {
+            margin-top: 0;
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <h1>42 Spacecraft Dynamics Simulator</h1>
+
+    <div class="container">
+        <div id="status" class="status status-loading">⏳ Loading WebAssembly module...</div>
+
+        <div class="info">
+            <h3>About This Simulator</h3>
+            <p>This is the 42 spacecraft dynamics simulator compiled to WebAssembly.
+               The Model directory (384 MB) is pre-loaded from <code>42.Model</code>.</p>
+            <p><strong>Note:</strong> You can only run the simulation once per page load.
+               Refresh the page to run another simulation.</p>
+        </div>
+
+        <div class="file-upload">
+            <h3>Upload Input Files (Optional)</h3>
+            <p>Upload files from your <code>InOut/</code> directory to customize the simulation:</p>
+            <input type="file" id="fileInput" multiple disabled accept=".txt,.dat">
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                Files will be placed in the virtual filesystem at <code>/InOut/</code>
+            </p>
+        </div>
+
+        <button id="runBtn" disabled onclick="runSimulation()">Run Simulation</button>
+        <button onclick="clearOutput()">Clear Output</button>
+    </div>
+
+    <div class="container">
+        <h3>Simulation Output</h3>
+        <div id="output">Waiting for module to load...</div>
+    </div>
+
+    <script>
+        let Module42Instance = null;
+        let outputText = '';
+
+        // Default Inp_Sim.txt configuration
+        const defaultSimConfig = `********** Sim Control Parameters **********
+0.0                        ! Sim Start Time, sec
+10000.0                    ! Sim Stop Time, sec
+0.1                        ! Sim Time Step, sec
+FAST_TIME                  ! FAST_TIME or REAL_TIME
+FALSE                      ! Graphics Front-End?
+FALSE                      ! cmd script?
+
+********** Orbit Parameters **********
+1                          ! Number of Orbits
+Inp_LEO.txt                ! Orbit file name
+
+********** Spacecraft Parameters **********
+1                          ! Number of Spacecraft
+Inp_ISS.txt                ! Spacecraft file name
+
+********** Environment Parameters **********
+1989 12 31 00 00 00.0      ! Year, Month, Day, Hour, Minute, Second (UTC)
+0.0                        ! Leap seconds to add to UTC to get TT
+FALSE                      ! Use Actual Leap Seconds?
+TRUE                       ! Compute Gravity Gradient Torque
+FALSE                      ! Compute Aero Torque
+FALSE                      ! Compute GGN Torque
+FALSE                      ! Compute Solar Radiation Pressure Torque
+TRUE                       ! Compute Contact Forces and Torques
+FALSE                      ! Compute Slosh Forces
+FALSE                      ! Compute Output Environmental Torques
+FALSE                      ! Enable Truth Vectors for FSW
+
+********** Truth Model Parameters **********
+FALSE                      ! Use Simple Dynamics Model
+TRUE                       ! Compute Joint Dynamics
+TRUE                       ! Compute Wheel Dynamics
+FALSE                      ! Compute MTB Dynamics
+FALSE                      ! Compute Thruster Dynamics
+
+********** Reference Orbit Parameters **********
+FALSE                      ! Enable Reference Orbits
+
+********** Environment Models **********
+MEAN                       ! Magnetic Field Model (NONE, DIPOLE, IGRF, MEAN)
+NONE                       ! Atmosphere Model (NONE, STD_ATM, STATIC_MSIS, MSIS)
+FALSE                      ! Aerodynamic Coef Update
+NONE                       ! Gravity Model (NONE, EARTH, etc)
+12 12                      ! Gravity Order (Max 21), Degree (Max 21)
+FALSE                      ! Enable Solar Flux
+
+********** Celestial Body Parameters **********
+TRUE                       ! Ephemeris Option
+DE430                      ! Ephemeris Model
+TRUE                       ! Moon Orientation Valid
+`;
+
+        // Module configuration for Emscripten
+        var Module = {
+            preRun: [],
+            postRun: [onModuleReady],
+            print: function(text) {
+                console.log(text);
+                outputText += text + '\n';
+                document.getElementById('output').textContent = outputText;
+                // Auto-scroll to bottom
+                document.getElementById('output').scrollTop =
+                    document.getElementById('output').scrollHeight;
+            },
+            printErr: function(text) {
+                console.error(text);
+                outputText += 'ERROR: ' + text + '\n';
+                document.getElementById('output').textContent = outputText;
+            },
+            setStatus: function(text) {
+                if (text) {
+                    console.log('Status: ' + text);
+                }
+            }
+        };
+
+        // Called when the WASM module is ready
+        function onModuleReady() {
+            if (!Module42Instance) {
+                Module42Instance = Module;
+            }
+
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status status-ready';
+            statusDiv.textContent = '✓ WebAssembly module loaded and ready';
+
+            document.getElementById('runBtn').disabled = false;
+            document.getElementById('fileInput').disabled = false;
+
+            // Create InOut and Model directories in virtual filesystem
+            try {
+                Module42Instance.FS.mkdir('/InOut');
+            } catch (e) {
+                console.log('InOut directory already exists or error:', e);
+            }
+
+            try {
+                Module42Instance.FS.mkdir('/Model');
+            } catch (e) {
+                console.log('Model directory already exists or error:', e);
+            }
+
+            // Write default simulation config
+            Module42Instance.FS.writeFile('/InOut/Inp_Sim.txt', defaultSimConfig);
+
+            outputText = 'Module loaded successfully.\n';
+            outputText += 'Model files pre-loaded from 42.Model (384 MB).\n';
+            outputText += 'Default Inp_Sim.txt created.\n';
+            outputText += 'Ready to run simulation.\n\n';
+            document.getElementById('output').textContent = outputText;
+        }
+
+        // Handle file uploads
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const files = event.target.files;
+            if (!Module42Instance) {
+                alert('Module not ready yet. Please wait for the module to load.');
+                return;
+            }
+
+            let uploadedCount = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const data = new Uint8Array(e.target.result);
+                    let path = '/InOut/' + file.name;
+
+                    try {
+                        Module42Instance.FS.writeFile(path, data);
+                        outputText += `✓ Uploaded: ${file.name}\n`;
+                        uploadedCount++;
+
+                        if (uploadedCount === files.length) {
+                            outputText += `\nAll ${uploadedCount} file(s) uploaded successfully.\n`;
+                        }
+                        document.getElementById('output').textContent = outputText;
+                    } catch (err) {
+                        outputText += `✗ Failed to upload ${file.name}: ${err}\n`;
+                        document.getElementById('output').textContent = outputText;
+                    }
+                };
+
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // Run the simulation
+        function runSimulation() {
+            if (!Module42Instance) {
+                alert('Module not loaded yet!');
+                return;
+            }
+
+            // Check if main has already been called
+            if (Module42Instance._main_called) {
+                alert('Simulation has already been run. Please refresh the page to run again.');
+                return;
+            }
+
+            outputText += '\n========================================\n';
+            outputText += 'Starting simulation...\n';
+            outputText += '========================================\n\n';
+            document.getElementById('output').textContent = outputText;
+
+            document.getElementById('runBtn').disabled = true;
+
+            try {
+                // Call the main function
+                Module42Instance.ccall('main', 'number', ['number', 'number'], [0, 0]);
+                Module42Instance._main_called = true;
+
+                outputText += '\n========================================\n';
+                outputText += 'Simulation complete!\n';
+                outputText += '========================================\n';
+                document.getElementById('output').textContent = outputText;
+            } catch (err) {
+                outputText += '\n✗ Error running simulation: ' + err + '\n';
+                document.getElementById('output').textContent = outputText;
+                document.getElementById('runBtn').disabled = false;
+            }
+        }
+
+        // Clear output
+        function clearOutput() {
+            outputText = '';
+            document.getElementById('output').textContent = 'Output cleared.';
+        }
+    </script>
+
+    <!-- Load the compiled 42.js (which loads 42.wasm and 42.Model) -->
+    <script src="42.js"></script>
+
+    <script>
+        // Initialize the Module42 factory function after 42.js loads
+        if (typeof Module42 !== 'undefined') {
+            Module42(Module).then(function(instance) {
+                console.log('Module42 factory called successfully');
+                Module42Instance = instance;
+            }).catch(function(err) {
+                console.error('Failed to initialize Module42:', err);
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status status-error';
+                statusDiv.textContent = '✗ Failed to load WebAssembly module: ' + err;
+            });
+        } else {
+            console.error('Module42 not defined - 42.js failed to load');
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status status-error';
+            statusDiv.textContent = '✗ Failed to load 42.js';
+        }
+    </script>
+</body>
+</html>

@@ -23,14 +23,21 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#ifndef __WASM__
+   #include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <fcntl.h>
+#ifndef __WASM__
+   #include <fcntl.h>
+#endif
 #ifdef _WIN32
    #include <winsock2.h>
+#elif defined(__WASM__)
+   /* WebAssembly doesn't support BSD sockets */
+   #define SOCKET int
 #else
    #include <sys/socket.h>
    #include <netinet/in.h>

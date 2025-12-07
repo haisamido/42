@@ -19,7 +19,7 @@ GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD)
 
 # vnc configurations
 EXTERNAL_VNC_PORT=5801
-INTERNAL_PORT=80
+INTERNAL_PORT=8080
 
 # Docker/podman config
 IMAGE_SUFFIX=
