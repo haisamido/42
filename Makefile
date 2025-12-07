@@ -465,6 +465,9 @@ web-down :
 		echo "No server running on port $(WEB_PORT)"; \
 	fi
 
+# Complete WebAssembly workflow - clean, build, and restart server
+web-all : clean wasm web-down web-up
+
 clean :
 ifeq ($(42PLATFORM),_WIN32)
 	del .\Object\*.o .\$(EXENAME) .\InOut\*.42

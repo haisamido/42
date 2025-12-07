@@ -11,5 +11,5 @@ a.out
 *.ipynb_checkpoints
 42.js
 42.Model
+42.data
 42.wasm
-
