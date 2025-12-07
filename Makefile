@@ -182,22 +182,37 @@ ifeq ($(42PLATFORM),__WASM__)
    EXTERNDIR =
    ARCHFLAG = -D __WASM__
 
-   # Disable GUI for WebAssembly (can enable with WebGL later)
-   GUIOBJ =
-   GLINC =
-   LIBS =
-   LFLAGS =
+   # WebGL and WebSocket support for WebAssembly
+   ifneq ($(strip $(GUIFLAG)),)
+      GUIOBJ = $(OBJ)42gl.o $(OBJ)42webgl.o $(OBJ)glkit.o $(OBJ)42gpgpu.o
+      GLINC = -I /usr/include/emscripten
+      LIBS = -lGLESv2 -lwebsocket.js
+      GUI_LIB = -D _USE_WEBGL_
+   else
+      GUIOBJ =
+      GLINC =
+      LIBS = -lwebsocket.js
+   endif
+
+   # WebSocket object files (always included for WASM)
+   WEBSOCKETOBJ = $(OBJ)42websocket.o
 
    NOS3OBJ =
    XWARN = -Wno-unused-variable
    EXENAME = 42.js
    CC = emcc
+   LFLAGS =
    # Emscripten-specific flags
    EMFLAGS = -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME="Module42" \
              -s EXPORTED_FUNCTIONS='["_main"]' -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
              -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB \
-             -s INVOKE_RUN=0 \
+             -s INVOKE_RUN=0 -s USE_WEBGL2=1 -s FULL_ES3=1 \
+             -s USE_PTHREADS=0 -s WEBSOCKET_URL=ws://localhost:8080 \
+             -s PROXY_TO_PTHREAD=0 -s FETCH=1 \
              --preload-file Model@/Model --use-preload-plugins
+else
+   # Non-WASM platforms don't use WebSocket objects
+   WEBSOCKETOBJ =
 endif
 
 # If not using GUI, don't compile GUI-related files
@@ -260,14 +275,18 @@ AUTOOBJ = $(OBJ)WriteAcToCsv.o $(OBJ)WriteScToCsv.o $(OBJ)TxRxIPC.o
 #ANSIFLAGS = -Wstrict-prototypes -pedantic -ansi -Werror
 ANSIFLAGS =
 
+ifeq ($(42PLATFORM),__WASM__)
+CFLAGS = -std=gnu11 -g -O0 -fpic -Wall -Wshadow -Wno-deprecated $(XWARN) $(ANSIFLAGS) $(GLINC) $(CINC) -I $(INC) -I $(KITINC) -I $(KITSRC) $(GMSECINC) $(ARCHFLAG) $(GUIFLAG) $(GUI_LIB) $(SHADERFLAG) $(CFDFLAG) $(FFTBFLAG) $(GSFCFLAG) $(GMSECFLAG) $(STANDALONEFLAG)
+else
 CFLAGS = -std=c11 -g -O0 -fpic -Wall -Wshadow -Wno-deprecated $(XWARN) $(ANSIFLAGS) $(GLINC) $(CINC) -I $(INC) -I $(KITINC) -I $(KITSRC) $(GMSECINC) $(ARCHFLAG) $(GUIFLAG) $(GUI_LIB) $(SHADERFLAG) $(CFDFLAG) $(FFTBFLAG) $(GSFCFLAG) $(GMSECFLAG) $(STANDALONEFLAG)
+endif
 
 
 ##########################  Rules to link 42  #############################
 
-42 : $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ)
+42 : $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ) $(WEBSOCKETOBJ)
 ifeq ($(42PLATFORM),__WASM__)
-	$(CC) $(CFLAGS) $(LFLAGS) $(GMSECBIN) $(EMFLAGS) -o $(EXENAME) $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ) $(LIBS)
+	$(CC) $(CFLAGS) $(LFLAGS) $(GMSECBIN) $(EMFLAGS) -o $(EXENAME) $(42OBJ) $(KITOBJ) $(GUIOBJ) $(NOS3OBJ) $(AUTOOBJ) $(ACOBJ) $(SCIPCOBJ) $(GMSECOBJ) $(FFTBOBJ) $(SLOSHOBJ) $(WEBSOCKETOBJ) $(LIBS)
 	@if [ -f 42.data ]; then mv 42.data 42.Model; fi
 	@sed -i.bak "s/42\.data/42.Model/g" 42.js && rm -f 42.js.bak
 else
@@ -436,16 +455,22 @@ $(OBJ)AcIPC.o  : $(AUTOSRC)AcIPC.c $(INC)Ac.h $(INC)AcTypes.h
 $(OBJ)42nos3.o         : $(SRC)42nos3.c
 	$(CC) $(CFLAGS) -c $(SRC)42nos3.c -o $(OBJ)42nos3.o
 
+$(OBJ)42webgl.o        : $(SRC)42webgl.c $(INC)42webgl.h
+	$(CC) $(CFLAGS) -c $(SRC)42webgl.c -o $(OBJ)42webgl.o
+
+$(OBJ)42websocket.o    : $(SRC)42websocket.c $(INC)42websocket.h
+	$(CC) $(CFLAGS) -c $(SRC)42websocket.c -o $(OBJ)42websocket.o
+
 
 ########################  Miscellaneous Rules  ############################
 
 # WebAssembly HTTP server port
 WEB_PORT = 8000
 
-# WebAssembly build target - explicitly set platform and disable GUI
+# WebAssembly build target with WebGL support
 wasm :
 	$(MAKE) clean
-	$(MAKE) 42 42PLATFORM=__WASM__ GUIFLAG=
+	$(MAKE) 42 42PLATFORM=__WASM__ GUIFLAG="-D _ENABLE_GUI_" SHADERFLAG="-D _USE_SHADERS_"
 
 # Start WebAssembly HTTP server
 web-up :

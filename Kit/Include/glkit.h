@@ -20,7 +20,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef __linux__
+#ifdef __WASM__
+   /* WebAssembly with WebGL */
+   #include <GLES3/gl3.h>
+   #include <emscripten.h>
+   #include <emscripten/html5.h>
+   #include "42webgl.h"
+#elif defined __linux__
    #define GL_GLEXT_PROTOTYPES
    #include <GL/glut.h>
    #include <GL/glu.h>

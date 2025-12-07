@@ -2551,6 +2551,11 @@ void CamRenderExec(void)
       FindModelMatrices();
       UpdatePOV();
 
+#ifdef __WASM__
+      /* WebGL rendering - show visual feedback */
+      WebGLRenderFrame();
+      WebGLUpdateSimTime(SimTime);
+#else
       if (VREnabled) {
          SetDestination(OFFSCREEN);
          SetEye(LEFTEYE);
@@ -2572,6 +2577,7 @@ void CamRenderExec(void)
          /* DrawContactSpheres(); */  /* Diagnostic only */
          DrawNearAuxObjects();
       }
+#endif
 }
 /*********************************************************************/
 void DrawClock(void)

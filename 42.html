@@ -3,62 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>42 Spacecraft Dynamics Simulator</title>
+    <title>42 Spacecraft Dynamics Simulator - WebGL Edition</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
         }
         h1 {
-            color: #333;
-            border-bottom: 3px solid #0066cc;
-            padding-bottom: 10px;
+            color: #fff;
+            background: linear-gradient(135deg, #0066cc 0%, #004999 100%);
+            padding: 20px;
+            margin: 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .main-container {
+            display: flex;
+            height: calc(100vh - 70px);
+        }
+        .left-panel {
+            width: 400px;
+            background-color: #2a2a2a;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+        }
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .canvas-container {
+            flex: 1;
+            background-color: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        #canvas {
+            border: 2px solid #0066cc;
+            max-width: 100%;
+            max-height: 100%;
         }
         .container {
-            background-color: white;
-            padding: 20px;
+            background-color: #333;
+            padding: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
         .status {
-            padding: 15px;
+            padding: 12px;
             border-radius: 5px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             font-weight: bold;
+            font-size: 14px;
         }
         .status-loading {
-            background-color: #fff3cd;
-            color: #856404;
+            background-color: #3d3d00;
+            color: #ffeb3b;
+            border-left: 4px solid #ffc107;
         }
         .status-ready {
-            background-color: #d4edda;
-            color: #155724;
+            background-color: #003d00;
+            color: #4caf50;
+            border-left: 4px solid #4caf50;
         }
         .status-error {
-            background-color: #f8d7da;
-            color: #721c24;
+            background-color: #3d0000;
+            color: #f44336;
+            border-left: 4px solid #f44336;
         }
         button {
-            background-color: #0066cc;
+            background: linear-gradient(135deg, #0066cc 0%, #004999 100%);
             color: white;
-            padding: 12px 24px;
+            padding: 10px 20px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 16px;
-            margin-right: 10px;
-            margin-bottom: 10px;
+            font-size: 14px;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            transition: all 0.3s;
         }
         button:hover:not(:disabled) {
-            background-color: #0052a3;
+            background: linear-gradient(135deg, #0052a3 0%, #003366 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,102,204,0.3);
         }
         button:disabled {
-            background-color: #cccccc;
+            background: #555;
             cursor: not-allowed;
+            transform: none;
         }
         #output {
             background-color: #1e1e1e;
@@ -66,132 +106,157 @@
             padding: 15px;
             border-radius: 5px;
             font-family: 'Courier New', monospace;
-            font-size: 14px;
+            font-size: 12px;
             white-space: pre-wrap;
-            max-height: 600px;
+            max-height: 300px;
             overflow-y: auto;
-            margin-top: 20px;
+            border: 1px solid #444;
         }
         .file-upload {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f8f9fa;
+            margin: 15px 0;
+            padding: 12px;
+            background-color: #3a3a3a;
             border-radius: 5px;
-            border: 2px dashed #ccc;
+            border: 2px dashed #555;
         }
         .file-upload:hover {
             border-color: #0066cc;
         }
         input[type="file"] {
-            margin-top: 10px;
+            margin-top: 8px;
+            color: #e0e0e0;
         }
         .info {
-            background-color: #e7f3ff;
-            padding: 15px;
+            background-color: #1a3a5a;
+            padding: 12px;
             border-left: 4px solid #0066cc;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             border-radius: 4px;
         }
         .info h3 {
             margin-top: 0;
-            color: #0066cc;
+            color: #4da6ff;
+            font-size: 16px;
+        }
+        .info p {
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        h3 {
+            color: #4da6ff;
+            margin-top: 0;
+            font-size: 16px;
+        }
+        .canvas-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            color: #4caf50;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
         }
     </style>
 </head>
 <body>
-    <h1>42 Spacecraft Dynamics Simulator</h1>
+    <h1>🛰️ 42 Spacecraft Dynamics Simulator - WebGL Edition</h1>
 
-    <div class="container">
-        <div id="status" class="status status-loading">⏳ Loading WebAssembly module...</div>
+    <div class="main-container">
+        <div class="left-panel">
 
-        <div class="info">
-            <h3>About This Simulator</h3>
-            <p>This is the 42 spacecraft dynamics simulator compiled to WebAssembly.
-               The Model directory (384 MB) is pre-loaded from <code>42.Model</code>.</p>
-            <p><strong>Note:</strong> You can only run the simulation once per page load.
-               Refresh the page to run another simulation.</p>
+            <div class="container">
+                <div id="status" class="status status-loading">⏳ Loading WebAssembly module...</div>
+
+                <div class="info">
+                    <h3>About This Simulator</h3>
+                    <p>42 spacecraft dynamics simulator with WebGL graphics and WebSocket support.</p>
+                    <p>The Model directory (384 MB) is pre-loaded from <code>42.Model</code>.</p>
+                    <p><strong>Note:</strong> Refresh the page to reset the simulation.</p>
+                </div>
+
+                <div class="file-upload">
+                    <h3>Upload Input Files</h3>
+                    <p>Upload files from your <code>InOut/</code> directory:</p>
+                    <input type="file" id="fileInput" multiple disabled accept=".txt,.dat">
+                </div>
+
+                <button id="runBtn" disabled onclick="runSimulation()">🚀 Run Simulation</button>
+                <button onclick="clearOutput()">🗑️ Clear Output</button>
+            </div>
+
+            <div class="container">
+                <h3>Simulation Output</h3>
+                <div id="output">Waiting for module to load...</div>
+            </div>
         </div>
 
-        <div class="file-upload">
-            <h3>Upload Input Files (Optional)</h3>
-            <p>Upload files from your <code>InOut/</code> directory to customize the simulation:</p>
-            <input type="file" id="fileInput" multiple disabled accept=".txt,.dat">
-            <p style="font-size: 12px; color: #666; margin-top: 10px;">
-                Files will be placed in the virtual filesystem at <code>/InOut/</code>
-            </p>
+        <div class="right-panel">
+            <div class="canvas-container">
+                <canvas id="canvas" width="800" height="600"></canvas>
+                <div class="canvas-overlay" id="canvasInfo">
+                    WebGL: Initializing...
+                </div>
+            </div>
         </div>
-
-        <button id="runBtn" disabled onclick="runSimulation()">Run Simulation</button>
-        <button onclick="clearOutput()">Clear Output</button>
-    </div>
-
-    <div class="container">
-        <h3>Simulation Output</h3>
-        <div id="output">Waiting for module to load...</div>
     </div>
 
     <script>
         let Module42Instance = null;
         let outputText = '';
+        let webglInitialized = false;
 
-        // Default Inp_Sim.txt configuration
-        const defaultSimConfig = `********** Sim Control Parameters **********
-0.0                        ! Sim Start Time, sec
-10000.0                    ! Sim Stop Time, sec
-0.1                        ! Sim Time Step, sec
-FAST_TIME                  ! FAST_TIME or REAL_TIME
-FALSE                      ! Graphics Front-End?
-FALSE                      ! cmd script?
+        // Initialize WebGL canvas info
+        function updateCanvasInfo(text) {
+            document.getElementById('canvasInfo').textContent = text;
+        }
 
-********** Orbit Parameters **********
-1                          ! Number of Orbits
-Inp_LEO.txt                ! Orbit file name
-
-********** Spacecraft Parameters **********
-1                          ! Number of Spacecraft
-Inp_ISS.txt                ! Spacecraft file name
-
-********** Environment Parameters **********
-1989 12 31 00 00 00.0      ! Year, Month, Day, Hour, Minute, Second (UTC)
-0.0                        ! Leap seconds to add to UTC to get TT
-FALSE                      ! Use Actual Leap Seconds?
-TRUE                       ! Compute Gravity Gradient Torque
-FALSE                      ! Compute Aero Torque
-FALSE                      ! Compute GGN Torque
-FALSE                      ! Compute Solar Radiation Pressure Torque
-TRUE                       ! Compute Contact Forces and Torques
-FALSE                      ! Compute Slosh Forces
-FALSE                      ! Compute Output Environmental Torques
-FALSE                      ! Enable Truth Vectors for FSW
-
-********** Truth Model Parameters **********
-FALSE                      ! Use Simple Dynamics Model
-TRUE                       ! Compute Joint Dynamics
-TRUE                       ! Compute Wheel Dynamics
-FALSE                      ! Compute MTB Dynamics
-FALSE                      ! Compute Thruster Dynamics
-
-********** Reference Orbit Parameters **********
-FALSE                      ! Enable Reference Orbits
-
-********** Environment Models **********
-MEAN                       ! Magnetic Field Model (NONE, DIPOLE, IGRF, MEAN)
-NONE                       ! Atmosphere Model (NONE, STD_ATM, STATIC_MSIS, MSIS)
-FALSE                      ! Aerodynamic Coef Update
-NONE                       ! Gravity Model (NONE, EARTH, etc)
-12 12                      ! Gravity Order (Max 21), Degree (Max 21)
-FALSE                      ! Enable Solar Flux
-
-********** Celestial Body Parameters **********
-TRUE                       ! Ephemeris Option
-DE430                      ! Ephemeris Model
-TRUE                       ! Moon Orientation Valid
+        // Default Inp_Sim.txt configuration with graphics enabled
+        const defaultSimConfig = `<<<<<<<<<<<<<<<<<  42: The Mostly Harmless Simulator  >>>>>>>>>>>>>>>>>
+************************** Simulation Control **************************
+FAST                            !  Time Mode (FAST, REAL, EXTERNAL, or NOS3)
+100.0     0.1                   !  Sim Duration, Step Size [sec]
+10.0                            !  File Output Interval [sec]
+0                               !  RNG Seed
+TRUE                            !  Graphics Front End?
+Inp_Cmd.txt                     !  Command Script File Name
+**************************  Reference Orbits  **************************
+1                               !  Number of Reference Orbits
+TRUE   Orb_LEO.txt              !  Input file name for Orb 0
+*****************************  Spacecraft  *****************************
+1                               !  Number of Spacecraft
+TRUE 0 SC_Simple.txt            !  Existence, RefOrb, Input file for SC 0
+***************************** Environment  *****************************
+04 08 2024                      !  Date (UTC) (Month, Day, Year)
+00 00 0.00                      !  Time (UTC) (Hr,Min,Sec)
+37.0                            !  Leap Seconds (sec)
+USER                            !  F10.7, Ap (USER, NOMINAL or TWOSIGMA)
+230.0                           !  USER-provided F10.7
+100.0                           !  USER-provided Ap
+IGRF                            !  Magfield (NONE,DIPOLE,IGRF)
+8   8                           !  IGRF Degree and Order (<=10)
+8   8                           !  Earth Gravity Model N and M (<=18)
+2   0                           !  Mars Gravity Model N and M (<=18)
+2   0                           !  Luna Gravity Model N and M (<=18)
+FALSE   FALSE                   !  Aerodynamic Forces & Torques (Shadows)
+FALSE                           !  Gravity Gradient Torques
+FALSE   FALSE                   !  Solar Pressure Forces & Torques (Shadows)
+FALSE                           !  Residual Magnetic Moment Torques
 `;
 
         // Module configuration for Emscripten
         var Module = {
             preRun: [],
             postRun: [onModuleReady],
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                canvas.addEventListener("webglcontextlost", function(e) {
+                    alert('WebGL context lost. You will need to reload the page.');
+                    e.preventDefault();
+                }, false);
+                return canvas;
+            })(),
             print: function(text) {
                 console.log(text);
                 outputText += text + '\n';
@@ -208,6 +273,7 @@ TRUE                       ! Moon Orientation Valid
             setStatus: function(text) {
                 if (text) {
                     console.log('Status: ' + text);
+                    updateCanvasInfo('WebGL: ' + text);
                 }
             }
         };
@@ -225,6 +291,9 @@ TRUE                       ! Moon Orientation Valid
             document.getElementById('runBtn').disabled = false;
             document.getElementById('fileInput').disabled = false;
 
+            // Initialize WebGL canvas info
+            updateCanvasInfo('WebGL: Ready | Canvas: 800x600');
+
             // Create InOut and Model directories in virtual filesystem
             try {
                 Module42Instance.FS.mkdir('/InOut');
@@ -238,12 +307,18 @@ TRUE                       ! Moon Orientation Valid
                 console.log('Model directory already exists or error:', e);
             }
 
-            // Write default simulation config
+            // Write default simulation config with graphics enabled
             Module42Instance.FS.writeFile('/InOut/Inp_Sim.txt', defaultSimConfig);
 
+            // Create minimal Inp_Cmd.txt (empty command file)
+            Module42Instance.FS.writeFile('/InOut/Inp_Cmd.txt', '# Empty command file\n');
+
             outputText = 'Module loaded successfully.\n';
+            outputText += 'WebGL graphics enabled.\n';
+            outputText += 'WebSocket support available.\n';
             outputText += 'Model files pre-loaded from 42.Model (384 MB).\n';
-            outputText += 'Default Inp_Sim.txt created.\n';
+            outputText += 'Default Inp_Sim.txt created (with graphics enabled).\n';
+            outputText += 'Default Inp_Cmd.txt created.\n';
             outputText += 'Ready to run simulation.\n\n';
             document.getElementById('output').textContent = outputText;
         }

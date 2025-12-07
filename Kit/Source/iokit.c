@@ -14,6 +14,10 @@
 
 #include "iokit.h"
 
+#ifdef __WASM__
+   #include "42websocket.h"
+#endif
+
 /* #ifdef __cplusplus
 ** namespace Kit {
 ** #endif
@@ -155,11 +159,9 @@ double *PpmToPsf(const char *path, const char *filename,
 SOCKET InitSocketServer(int Port, int AllowBlocking)
 {
 #if defined(__WASM__)
-   /* WebAssembly doesn't support traditional sockets */
-   /* Use WebSockets via JavaScript interop instead */
-   printf("Warning: Socket operations not supported in WebAssembly build.\n");
-   printf("Use WebSockets via JavaScript for network communication.\n");
-   return -1;
+   /* WebAssembly: Use WebSockets instead of traditional sockets */
+   printf("Note: Using WebSocket server (requires external WebSocket server).\n");
+   return InitWebSocketServer(Port, AllowBlocking);
 
 #elif defined(_WIN32)
 
@@ -270,11 +272,9 @@ SOCKET InitSocketServer(int Port, int AllowBlocking)
 SOCKET InitSocketClient(const char *hostname, int Port,int AllowBlocking)
 {
 #if defined(__WASM__)
-   /* WebAssembly doesn't support traditional sockets */
-   /* Use WebSockets via JavaScript interop instead */
-   printf("Warning: Socket operations not supported in WebAssembly build.\n");
-   printf("Use WebSockets via JavaScript for network communication.\n");
-   return -1;
+   /* WebAssembly: Use WebSockets instead of traditional sockets */
+   printf("Note: Using WebSocket client to connect to %s:%d\n", hostname, Port);
+   return InitWebSocketClient(hostname, Port, AllowBlocking);
 
 #elif defined(_WIN32)
 
