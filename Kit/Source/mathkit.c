@@ -334,7 +334,9 @@ double UNITV(double V[3])
          V[2]/=A;
       }
       else {
+#ifndef __WASM__
          printf("Attempted divide by zero in UNITV (mathkit.c:%d)\n",__LINE__);
+#endif
          V[0] = 0.0;
          V[1] = 0.0;
          V[2] = 0.0;
@@ -354,7 +356,9 @@ double CopyUnitV(double V[3], double W[3])
          W[2] = V[2]/A;
       }
       else {
+#ifndef __WASM__
          printf("Attempted divide by zero in COPYUNITV (mathkit.c:%d)\n",__LINE__);
+#endif
          W[0] = 0.0;
          W[1] = 0.0;
          W[2] = 0.0;
@@ -520,9 +524,12 @@ void UNITQ(double Q[4])
       double A;
 
       A=sqrt(Q[0]*Q[0]+Q[1]*Q[1]+Q[2]*Q[2]+Q[3]*Q[3]);
-      if (A == 0.0) {
-         printf("Divide by zero in UNITQ (Line %d of mathkit.c).  You'll want to fix that.\n",__LINE__);
-         exit(1);
+      if (A == 0.0 || A < 1.0E-12) {
+         // Initialize uninitialized quaternion to identity
+         Q[0] = 0.0;
+         Q[1] = 0.0;
+         Q[2] = 0.0;
+         Q[3] = 1.0;
       }
       else {
          Q[0]/=A;

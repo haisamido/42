@@ -19,6 +19,15 @@
 ** using namespace Kit;
 ** #endif
 */
+
+/* Stub for FindCssAlbedo when GPGPU/shaders are not available */
+#if !defined(_USE_SHADERS_) || defined(__WASM__)
+void FindCssAlbedo(struct SCType *S, struct CssType *CSS) {
+    /* Stub implementation - albedo calculation requires GPGPU shaders */
+    CSS->Albedo = 0.0;
+}
+#endif
+
 /**********************************************************************/
 /*  Substantial contributions to this model provided                  */
 /*  by Jeffrey Calixto, 2019 summer intern.                           */

@@ -184,7 +184,7 @@ ifeq ($(42PLATFORM),__WASM__)
 
    # WebGL and WebSocket support for WebAssembly
    ifneq ($(strip $(GUIFLAG)),)
-      GUIOBJ = $(OBJ)42gl.o $(OBJ)42webgl.o $(OBJ)glkit.o $(OBJ)42gpgpu.o
+      GUIOBJ = $(OBJ)42gl.o $(OBJ)42webgl.o $(OBJ)glkit.o
       GLINC = -I /usr/include/emscripten
       LIBS = -lGLESv2 -lwebsocket.js
       GUI_LIB = -D _USE_WEBGL_
@@ -198,18 +198,23 @@ ifeq ($(42PLATFORM),__WASM__)
    WEBSOCKETOBJ = $(OBJ)42websocket.o
 
    NOS3OBJ =
-   XWARN = -Wno-unused-variable
+   XWARN = -Wno-unused-variable -Wno-unused-but-set-variable
    EXENAME = 42.js
    CC = emcc
    LFLAGS =
    # Emscripten-specific flags
+   # NOTE: The Model directory is 384MB. For production, consider:
+   #   1. Using --use-preload-cache to enable browser caching
+   #   2. Serving assets from a CDN and loading on-demand
+   #   3. Creating a minimal Model directory with only essential files
    EMFLAGS = -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME="Module42" \
              -s EXPORTED_FUNCTIONS='["_main"]' -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
              -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=256MB \
              -s INVOKE_RUN=0 -s USE_WEBGL2=1 -s FULL_ES3=1 \
              -s USE_PTHREADS=0 -s WEBSOCKET_URL=ws://localhost:8080 \
              -s PROXY_TO_PTHREAD=0 -s FETCH=1 \
-             --preload-file Model@/Model --use-preload-plugins
+             --preload-file Model@/Model --preload-file InOut@/InOut \
+             --use-preload-plugins --use-preload-cache
 else
    # Non-WASM platforms don't use WebSocket objects
    WEBSOCKETOBJ =
@@ -470,7 +475,7 @@ WEB_PORT = 8000
 # WebAssembly build target with WebGL support
 wasm :
 	$(MAKE) clean
-	$(MAKE) 42 42PLATFORM=__WASM__ GUIFLAG="-D _ENABLE_GUI_" SHADERFLAG="-D _USE_SHADERS_"
+	$(MAKE) 42 42PLATFORM=__WASM__ GUIFLAG="-D _ENABLE_GUI_" SHADERFLAG=""
 
 # Start WebAssembly HTTP server
 web-up :

@@ -172,7 +172,8 @@
                 <div class="info">
                     <h3>About This Simulator</h3>
                     <p>42 spacecraft dynamics simulator with WebGL graphics and WebSocket support.</p>
-                    <p>The Model directory (384 MB) is pre-loaded from <code>42.Model</code>.</p>
+                    <p>Model and InOut directories (384 MB) are pre-loaded from <code>42.Model</code>.</p>
+                    <p>All configuration files are ready: Inp_Sim.txt, SC_Simple.txt, Orb_LEO.txt, etc.</p>
                     <p><strong>Note:</strong> Refresh the page to reset the simulation.</p>
                 </div>
 
@@ -294,31 +295,40 @@ FALSE                           !  Residual Magnetic Moment Torques
             // Initialize WebGL canvas info
             updateCanvasInfo('WebGL: Ready | Canvas: 800x600');
 
-            // Create InOut and Model directories in virtual filesystem
+            // Create InOut and Model directories in virtual filesystem (if not already preloaded)
             try {
                 Module42Instance.FS.mkdir('/InOut');
             } catch (e) {
-                console.log('InOut directory already exists or error:', e);
+                // Directory already exists from preload - this is expected
+                if (e.code !== 'EEXIST') {
+                    console.warn('Error creating InOut directory:', e.message);
+                }
             }
 
             try {
                 Module42Instance.FS.mkdir('/Model');
             } catch (e) {
-                console.log('Model directory already exists or error:', e);
+                // Directory already exists from preload - this is expected
+                if (e.code !== 'EEXIST') {
+                    console.warn('Error creating Model directory:', e.message);
+                }
             }
 
-            // Write default simulation config with graphics enabled
-            Module42Instance.FS.writeFile('/InOut/Inp_Sim.txt', defaultSimConfig);
+            // Note: Inp_Sim.txt and Inp_Cmd.txt are now preloaded from the InOut directory
+            // Don't overwrite them unless the user uploads new versions
 
-            // Create minimal Inp_Cmd.txt (empty command file)
-            Module42Instance.FS.writeFile('/InOut/Inp_Cmd.txt', '# Empty command file\n');
+            // Create minimal Inp_Cmd.txt if it doesn't exist
+            try {
+                Module42Instance.FS.stat('/InOut/Inp_Cmd.txt');
+            } catch (e) {
+                Module42Instance.FS.writeFile('/InOut/Inp_Cmd.txt', '# Empty command file\n');
+            }
 
             outputText = 'Module loaded successfully.\n';
             outputText += 'WebGL graphics enabled.\n';
             outputText += 'WebSocket support available.\n';
-            outputText += 'Model files pre-loaded from 42.Model (384 MB).\n';
-            outputText += 'Default Inp_Sim.txt created (with graphics enabled).\n';
-            outputText += 'Default Inp_Cmd.txt created.\n';
+            outputText += 'Model and InOut files pre-loaded from 42.Model (384 MB).\n';
+            outputText += 'Configuration files ready (Inp_Sim.txt, SC_Simple.txt, Orb_LEO.txt, etc.).\n';
             outputText += 'Ready to run simulation.\n\n';
             document.getElementById('output').textContent = outputText;
         }
@@ -403,7 +413,8 @@ FALSE                           !  Residual Magnetic Moment Torques
     </script>
 
     <!-- Load the compiled 42.js (which loads 42.wasm and 42.Model) -->
-    <script src="42.js"></script>
+    <!-- Cache-busting parameter forces reload of updated files -->
+    <script src="42.js?v=1767808024"></script>
 
     <script>
         // Initialize the Module42 factory function after 42.js loads

@@ -19,11 +19,18 @@
 #include <math.h>
 #include <string.h>
 #include "42webgl.h"
+#include "42types.h"
 
 /* Global WebGL context */
 EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl_context = 0;
 int canvas_width = 800;
 int canvas_height = 600;
+
+/* Track if main loop has been started */
+static int main_loop_started = 0;
+
+/* Track if simulation is initialized and ready to render */
+static int simulation_initialized = 0;
 
 /* Callback function pointers */
 static void (*display_func)(void) = NULL;
@@ -217,6 +224,185 @@ void webgl_glutMainLoop(void)
 }
 
 /*********************************************************************/
+/* WebGL-aware capability management */
+/*********************************************************************/
+
+/*
+ * These functions wrap glEnable/glDisable to handle OpenGL capabilities
+ * that are not supported in WebGL ES 2.0/3.0.
+ *
+ * Supported capabilities are passed through to the real GL functions.
+ * Unsupported legacy capabilities (lighting, normalize, etc.) are silently ignored.
+ */
+
+/* Declare the real OpenGL functions (before macro redefinition) */
+extern void glEnable(GLenum cap);
+extern void glDisable(GLenum cap);
+
+void webgl_glEnable(GLenum cap)
+{
+    switch(cap) {
+        /* Capabilities supported in WebGL ES 2.0/3.0 */
+        case GL_BLEND:
+        case GL_CULL_FACE:
+        case GL_DEPTH_TEST:
+        case GL_DITHER:
+        case GL_POLYGON_OFFSET_FILL:
+        case GL_SAMPLE_ALPHA_TO_COVERAGE:
+        case GL_SAMPLE_COVERAGE:
+        case GL_SCISSOR_TEST:
+        case GL_STENCIL_TEST:
+            /* Pass through to real OpenGL function via asm to avoid macro expansion */
+            EM_ASM({ GLctx.enable($0); }, cap);
+            break;
+
+        /* WebGL ES 3.0 specific capabilities */
+        case GL_RASTERIZER_DISCARD:
+            #ifdef GL_ES_VERSION_3_0
+            EM_ASM({ GLctx.enable($0); }, cap);
+            #endif
+            break;
+
+        /* Texture capabilities (supported) */
+        case GL_TEXTURE_2D:
+        case GL_TEXTURE_CUBE_MAP:
+            /* Note: In modern GL, these are enabled per-texture unit, not globally */
+            /* For compatibility, we'll allow the call but it's effectively a no-op */
+            /* Textures are enabled by binding them with glBindTexture */
+            break;
+
+        /* Legacy capabilities not supported in WebGL - silently ignore */
+        case GL_LIGHTING:
+        case GL_NORMALIZE:
+        case GL_COLOR_MATERIAL:
+        case GL_LINE_SMOOTH:
+        case GL_POINT_SMOOTH:
+        case GL_POLYGON_SMOOTH:
+        case GL_ALPHA_TEST:
+        case GL_AUTO_NORMAL:
+        case GL_FOG:
+        case GL_LIGHT0:
+        case GL_LIGHT1:
+        case GL_LIGHT2:
+        case GL_LIGHT3:
+        case GL_LIGHT4:
+        case GL_LIGHT5:
+        case GL_LIGHT6:
+        case GL_LIGHT7:
+        case GL_TEXTURE_1D:
+        case GL_TEXTURE_3D:
+            /* Silently ignore - these are handled by shaders in WebGL */
+            break;
+
+        default:
+            /* Unknown capability - try to enable it anyway, might be valid */
+            EM_ASM({
+                try {
+                    GLctx.enable($0);
+                } catch(e) {
+                    console.warn('WebGL: Cannot enable capability 0x' + $0.toString(16));
+                }
+            }, cap);
+            break;
+    }
+}
+
+void webgl_glDisable(GLenum cap)
+{
+    switch(cap) {
+        /* Capabilities supported in WebGL ES 2.0/3.0 */
+        case GL_BLEND:
+        case GL_CULL_FACE:
+        case GL_DEPTH_TEST:
+        case GL_DITHER:
+        case GL_POLYGON_OFFSET_FILL:
+        case GL_SAMPLE_ALPHA_TO_COVERAGE:
+        case GL_SAMPLE_COVERAGE:
+        case GL_SCISSOR_TEST:
+        case GL_STENCIL_TEST:
+            /* Pass through to real OpenGL function via asm to avoid macro expansion */
+            EM_ASM({ GLctx.disable($0); }, cap);
+            break;
+
+        /* WebGL ES 3.0 specific capabilities */
+        case GL_RASTERIZER_DISCARD:
+            #ifdef GL_ES_VERSION_3_0
+            EM_ASM({ GLctx.disable($0); }, cap);
+            #endif
+            break;
+
+        /* Texture capabilities (supported) */
+        case GL_TEXTURE_2D:
+        case GL_TEXTURE_CUBE_MAP:
+            /* Note: In modern GL, these are enabled per-texture unit, not globally */
+            /* For compatibility, we'll allow the call but it's effectively a no-op */
+            break;
+
+        /* Legacy capabilities not supported in WebGL - silently ignore */
+        case GL_LIGHTING:
+        case GL_NORMALIZE:
+        case GL_COLOR_MATERIAL:
+        case GL_LINE_SMOOTH:
+        case GL_POINT_SMOOTH:
+        case GL_POLYGON_SMOOTH:
+        case GL_ALPHA_TEST:
+        case GL_AUTO_NORMAL:
+        case GL_FOG:
+        case GL_LIGHT0:
+        case GL_LIGHT1:
+        case GL_LIGHT2:
+        case GL_LIGHT3:
+        case GL_LIGHT4:
+        case GL_LIGHT5:
+        case GL_LIGHT6:
+        case GL_LIGHT7:
+        case GL_TEXTURE_1D:
+        case GL_TEXTURE_3D:
+            /* Silently ignore - these are handled by shaders in WebGL */
+            break;
+
+        default:
+            /* Unknown capability - try to disable it anyway, might be valid */
+            EM_ASM({
+                try {
+                    GLctx.disable($0);
+                } catch(e) {
+                    console.warn('WebGL: Cannot disable capability 0x' + $0.toString(16));
+                }
+            }, cap);
+            break;
+    }
+}
+
+void webgl_glBindTexture(GLenum target, GLuint texture)
+{
+    switch(target) {
+        case GL_TEXTURE_2D:
+        case GL_TEXTURE_CUBE_MAP:
+            /* Supported texture targets - pass through */
+            EM_ASM({ GLctx.bindTexture($0, GL.textures[$1]); }, target, texture);
+            break;
+
+        case GL_TEXTURE_1D:
+        case GL_TEXTURE_3D:
+            /* WebGL doesn't support 1D or 3D textures - silently ignore */
+            /* In a full implementation, these would need to be converted to 2D textures */
+            break;
+
+        default:
+            /* Unknown target - try anyway */
+            EM_ASM({
+                try {
+                    GLctx.bindTexture($0, GL.textures[$1]);
+                } catch(e) {
+                    console.warn('WebGL: Cannot bind texture target 0x' + $0.toString(16));
+                }
+            }, target, texture);
+            break;
+    }
+}
+
+/*********************************************************************/
 /* GLU function implementations */
 /*********************************************************************/
 
@@ -347,31 +533,58 @@ void WebGLUpdateSimTime(double time)
 
 int HandoffToGui(int argc, char **argv)
 {
-    /* WebGL initialization is handled through Module initialization */
-    /* Initialize WebGL context */
+    /* In WebAssembly, we need to set up the main loop but only once.
+     * This function is called from main() after initialization.
+     * We start the main loop here, which will call our Idle() function.
+     */
+
     printf("HandoffToGui: Initializing WebGL\n");
 
-    if (!InitWebGL("#canvas")) {
-        printf("Failed to initialize WebGL\n");
-        return -1;
+    /* Initialize WebGL context if not already done */
+    if (webgl_context == 0) {
+        if (!InitWebGL("#canvas")) {
+            printf("Failed to initialize WebGL\n");
+            return -1;
+        }
     }
 
     /* Set up basic GL state */
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.0f, 0.0f, 0.2f, 1.0f);
 
+    /* Load shaders - CRITICAL for WebGL rendering */
+    #ifdef _USE_SHADERS_
+    extern void LoadCamShaders(void);
+    printf("HandoffToGui: Loading shaders\n");
+    LoadCamShaders();
+    printf("HandoffToGui: Shaders loaded\n");
+    #endif
+
     /* Set up GLUT-style callbacks for rendering */
-    /* Note: CamRenderExec is defined in 42gl.c */
     extern void CamRenderExec(void);
     extern void Idle(void);
 
     glutDisplayFunc(CamRenderExec);
     glutIdleFunc(Idle);
 
-    /* Start the WebGL main loop */
-    glutMainLoop();
+    /* Mark simulation as initialized and ready to render - MUST be before glutMainLoop */
+    simulation_initialized = 1;
+    printf("HandoffToGui: Simulation marked as initialized\n");
 
-    printf("WebGL initialized successfully\n");
+    /* Start the WebGL main loop - but only if not already started */
+    if (!main_loop_started) {
+        printf("HandoffToGui: Starting WebGL main loop\n");
+        main_loop_started = 1;
+        glutMainLoop();
+        /* Note: glutMainLoop() calls emscripten_set_main_loop() which returns immediately
+         * in WebAssembly. The loop will continue running in the background. */
+    }
+    else {
+        printf("HandoffToGui: Main loop already running\n");
+    }
+
+    printf("HandoffToGui: WebGL initialized successfully\n");
+
     return 0;
 }
 
@@ -382,19 +595,39 @@ void Idle(void)
     extern void CamRenderExec(void);
     extern long GLOutFlag;
     extern long PauseFlag;
+    extern struct POVType POV;
     long Done = 0;
+
+    /* Don't do anything until simulation is initialized */
+    if (!simulation_initialized) {
+        /* Just clear the screen while waiting */
+        glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        return;
+    }
 
     if (PauseFlag) {
         /* When paused, just render the current state */
-        CamRenderExec();
-    }
-    else {
-        /* Run simulation step */
-        Done = SimStep();
-
-        /* Render if GL output is enabled */
         if (GLOutFlag) {
             CamRenderExec();
+        }
+    }
+    else {
+        /* Reset POV angular velocity before simulation step */
+        POV.w[0] = 0.0;
+        POV.w[1] = 0.0;
+        POV.w[2] = 0.0;
+
+        /* Run simulation step FIRST to populate data structures */
+        printf("Idle: About to call SimStep()\n");
+        Done = SimStep();
+        printf("Idle: SimStep() returned Done=%ld\n", Done);
+
+        /* Now it's safe to render with updated positions */
+        if (GLOutFlag) {
+            printf("Idle: About to call CamRenderExec()\n");
+            CamRenderExec();
+            printf("Idle: CamRenderExec() completed\n");
         }
 
         /* Exit if simulation is done */

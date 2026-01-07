@@ -151,6 +151,13 @@ void DrawSunAsBackdrop(void)
       /* Transform and scale into Eye frame */
       for(i=0;i<3;i++) svh[i] = -POV.PosH[i];
       SunDist = UNITV(svh);
+
+      /* Skip rendering if POV is not initialized (still at origin) */
+      if (SunDist < 1.0) {
+         glPopMatrix();
+         return;
+      }
+
       MxV(POV.CH,svh,UnitSunVecE);
 
       RadRatio = World[0].rad/SunDist;
@@ -538,15 +545,18 @@ void DrawPlanetLabels(GLfloat length)
          if (World[i].Exists) {
             glColor4fv(World[i].Color);
             for(j=0;j<3;j++) Vec[j] = World[i].PosH[j]-SC[POV.Host.SC].PosH[j];
-            UNITV(Vec);
-            glBegin(GL_LINES);
-               glVertex3f(0.0,0.0,0.0);
-               glVertex3f(length*Vec[0],length*Vec[1],length*Vec[2]);
-            glEnd();
-            glRasterPos3f((length+0.2)*Vec[0],
-                          (length+0.2)*Vec[1],
-                          (length+0.2)*Vec[2]);
-            glBitmap(8, 14, 0.0, 0.0, 0.0, 0.0, World[i].Glyph);
+            double mag = sqrt(Vec[0]*Vec[0] + Vec[1]*Vec[1] + Vec[2]*Vec[2]);
+            if (mag > 1.0) {  /* Skip if vector is too small */
+               UNITV(Vec);
+               glBegin(GL_LINES);
+                  glVertex3f(0.0,0.0,0.0);
+                  glVertex3f(length*Vec[0],length*Vec[1],length*Vec[2]);
+               glEnd();
+               glRasterPos3f((length+0.2)*Vec[0],
+                             (length+0.2)*Vec[1],
+                             (length+0.2)*Vec[2]);
+               glBitmap(8, 14, 0.0, 0.0, 0.0, 0.0, World[i].Glyph);
+            }
          }
       }
       glPopMatrix();
@@ -1152,29 +1162,32 @@ void DrawFarScene(void)
          }
          else if (W->Visibility == WORLD_SHOWS_DISK) {
             for(j=0;j<3;j++) svh[j] = -W->PosH[j];
-            UNITV(svh);
-            if (W->MeshTag == 0) { /* World is sphere */
-               MxV(World[POV.Host.World].CNH,rh[Iw],PosN);
-               MxV(World[POV.Host.World].CNH,svh,svn);
-               DrawWorldAsBackdrop(W,PosN,svn);
-            }
-            else {
-               glClear(GL_DEPTH_BUFFER_BIT);
-               glMatrixMode(GL_PROJECTION);
-               glLoadIdentity();
-               gluPerspective(POV.Angle,POV.AR,
-                  W->NearExtent,W->FarExtent);
-               glMatrixMode(GL_MODELVIEW);
-               glUseProgram(BodyShaderProgram);
-               glUniform1i(ShadowsEnabledLoc,ShadowsEnabled);
-               glUniformMatrix3fv(CNELoc,1,0,CNE);
-               glPushMatrix();
-               glTranslated(-rh[Iw][0],-rh[Iw][1],-rh[Iw][2]);
-               RotateR2L(W->CNH);
-               RotateR2L(W->CWN);
-               glCallList(Mesh[W->MeshTag].OpaqueListTag);
-               glPopMatrix();
-               glUseProgram(0);
+            double mag = sqrt(svh[0]*svh[0] + svh[1]*svh[1] + svh[2]*svh[2]);
+            if (mag > 1.0) {  /* Skip if vector is too small */
+               UNITV(svh);
+               if (W->MeshTag == 0) { /* World is sphere */
+                  MxV(World[POV.Host.World].CNH,rh[Iw],PosN);
+                  MxV(World[POV.Host.World].CNH,svh,svn);
+                  DrawWorldAsBackdrop(W,PosN,svn);
+               }
+               else {
+                  glClear(GL_DEPTH_BUFFER_BIT);
+                  glMatrixMode(GL_PROJECTION);
+                  glLoadIdentity();
+                  gluPerspective(POV.Angle,POV.AR,
+                     W->NearExtent,W->FarExtent);
+                  glMatrixMode(GL_MODELVIEW);
+                  glUseProgram(BodyShaderProgram);
+                  glUniform1i(ShadowsEnabledLoc,ShadowsEnabled);
+                  glUniformMatrix3fv(CNELoc,1,0,CNE);
+                  glPushMatrix();
+                  glTranslated(-rh[Iw][0],-rh[Iw][1],-rh[Iw][2]);
+                  RotateR2L(W->CNH);
+                  RotateR2L(W->CWN);
+                  glCallList(Mesh[W->MeshTag].OpaqueListTag);
+                  glPopMatrix();
+                  glUseProgram(0);
+               }
             }
          }
       }
@@ -1243,11 +1256,14 @@ void DrawFarScene(void)
          for(i=0;i<10;i++) {
             if (Tdrs[i].Exists) {
                for(j=0;j<3;j++) PosN[j] = Tdrs[i].PosN[j] - POV.PosN[j];
-               UNITV(PosN);
-               for(j=0;j<3;j++) PosN[j] *= SkyDistance;
-               glRasterPos3d(PosN[0],PosN[1],PosN[2]);
-               glBitmap(16,16,8.0,8.0,10,-8,TdrsGlyph);
-               DrawString8x11(Tdrs[i].Designation);
+               double mag = sqrt(PosN[0]*PosN[0] + PosN[1]*PosN[1] + PosN[2]*PosN[2]);
+               if (mag > 1.0) {  /* Skip if vector is too small */
+                  UNITV(PosN);
+                  for(j=0;j<3;j++) PosN[j] *= SkyDistance;
+                  glRasterPos3d(PosN[0],PosN[1],PosN[2]);
+                  glBitmap(16,16,8.0,8.0,10,-8,TdrsGlyph);
+                  DrawString8x11(Tdrs[i].Designation);
+               }
             }
          }
          glEnable(GL_LIGHTING);
@@ -1262,11 +1278,14 @@ void DrawFarScene(void)
             glColor4fv(ScColor);
             for(i=0;i<3;i++) PosH[i] = S->PosH[i] - POV.PosH[i];
             MxV(World[POV.Host.World].CNH,PosH,PosN);
-            UNITV(PosN);
-            for(i=0;i<3;i++) PosN[i] *= SkyDistance;
-            glRasterPos3d(PosN[0],PosN[1],PosN[2]);
-            glBitmap(16,16,8.0,8.0,10,-8,ScGlyph);
-            DrawString8x11(S->Label);
+            double mag = sqrt(PosN[0]*PosN[0] + PosN[1]*PosN[1] + PosN[2]*PosN[2]);
+            if (mag > 1.0) {  /* Skip if vector is too small */
+               UNITV(PosN);
+               for(i=0;i<3;i++) PosN[i] *= SkyDistance;
+               glRasterPos3d(PosN[0],PosN[1],PosN[2]);
+               glBitmap(16,16,8.0,8.0,10,-8,ScGlyph);
+               DrawString8x11(S->Label);
+            }
          }
       }
       glEnable(GL_LIGHTING);
@@ -2552,8 +2571,36 @@ void CamRenderExec(void)
       UpdatePOV();
 
 #ifdef __WASM__
-      /* WebGL rendering - show visual feedback */
-      WebGLRenderFrame();
+      /* WebGL rendering - render the actual scene */
+      glClearColor(0.0f, 0.0f, 0.0f, 1.0f);  /* Black background */
+      glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+      /* DEBUG: Draw a simple test triangle to verify WebGL is working */
+      glMatrixMode(GL_PROJECTION);
+      glLoadIdentity();
+      glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+      glMatrixMode(GL_MODELVIEW);
+      glLoadIdentity();
+      glDisable(GL_DEPTH_TEST);
+      glColor3f(1.0f, 0.0f, 0.0f);  /* Red */
+      glBegin(GL_TRIANGLES);
+      glVertex2f(0.0f, 0.5f);
+      glVertex2f(-0.5f, -0.5f);
+      glVertex2f(0.5f, -0.5f);
+      glEnd();
+      glEnable(GL_DEPTH_TEST);
+      printf("CamRenderExec: Test triangle drawn\n");
+      /* END DEBUG */
+
+      SetDestination(ONSCREEN);
+      printf("CamRenderExec: About to call DrawFarScene()\n");
+      DrawFarScene();
+      printf("CamRenderExec: About to call DrawBodies()\n");
+      SetEye(MONOCULAR);
+      DrawBodies();
+      printf("CamRenderExec: About to call DrawNearAuxObjects()\n");
+      DrawNearAuxObjects();
+      printf("CamRenderExec: Rendering complete\n");
       WebGLUpdateSimTime(SimTime);
 #else
       if (VREnabled) {
@@ -3242,7 +3289,7 @@ void DrawOrrery(void)
          glTranslated(-W->PosH[0],-W->PosH[1],-W->PosH[2]);
       }
 
-      glDisable(GL_DEPTH);
+      glDisable(GL_DEPTH_TEST);
 
       glLineWidth(2.0);
 
@@ -3356,7 +3403,7 @@ void DrawOrrery(void)
          }
       }
 
-      glEnable(GL_DEPTH);
+      glEnable(GL_DEPTH_TEST);
 
 /* .. Draw Sun */
       P = &World[SOL];

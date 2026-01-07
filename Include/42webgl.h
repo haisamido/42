@@ -102,11 +102,26 @@ void WebGLUpdateSimTime(double time);
 #define glMaterialf(face,pname,param)  /* No-op in WebGL */
 #define glColorMaterial(face,mode)     /* No-op in WebGL */
 #define glShadeModel(mode)             /* No-op in WebGL */
-#define glNormalize(mode)              /* No-op in WebGL */
+
+/* WebGL capability management wrappers */
+void webgl_glEnable(GLenum cap);
+void webgl_glDisable(GLenum cap);
+
+/* Override glEnable/glDisable to use WebGL-aware versions */
+#define glEnable(cap)  webgl_glEnable(cap)
+#define glDisable(cap) webgl_glDisable(cap)
 
 /* Legacy texture environment (use shaders in WebGL) */
 #define glTexEnvf(target,pname,param)  /* No-op in WebGL */
 #define glTexImage1D(target,level,internal,width,border,format,type,data) /* No-op in WebGL */
+
+/* WebGL doesn't support 1D or 3D textures - they need to be converted to 2D */
+/* For now, we'll no-op the bind calls to avoid GL errors */
+#ifdef glBindTexture
+#undef glBindTexture
+#endif
+void webgl_glBindTexture(GLenum target, GLuint texture);
+#define glBindTexture(target, texture) webgl_glBindTexture(target, texture)
 
 /* Legacy drawing buffer */
 #define glDrawBuffer(mode)             /* No-op in WebGL */
@@ -180,8 +195,47 @@ void WebGLUpdateSimTime(double time);
 #ifndef GL_LIGHT0
 #define GL_LIGHT0 0x4000
 #endif
+#ifndef GL_LIGHT1
+#define GL_LIGHT1 0x4001
+#endif
+#ifndef GL_LIGHT2
+#define GL_LIGHT2 0x4002
+#endif
+#ifndef GL_LIGHT3
+#define GL_LIGHT3 0x4003
+#endif
+#ifndef GL_LIGHT4
+#define GL_LIGHT4 0x4004
+#endif
+#ifndef GL_LIGHT5
+#define GL_LIGHT5 0x4005
+#endif
+#ifndef GL_LIGHT6
+#define GL_LIGHT6 0x4006
+#endif
+#ifndef GL_LIGHT7
+#define GL_LIGHT7 0x4007
+#endif
 #ifndef GL_POSITION
 #define GL_POSITION 0x1203
+#endif
+#ifndef GL_FOG
+#define GL_FOG 0x0B60
+#endif
+#ifndef GL_POINT_SMOOTH
+#define GL_POINT_SMOOTH 0x0B10
+#endif
+#ifndef GL_POLYGON_SMOOTH
+#define GL_POLYGON_SMOOTH 0x0B41
+#endif
+#ifndef GL_ALPHA_TEST
+#define GL_ALPHA_TEST 0x0BC0
+#endif
+#ifndef GL_AUTO_NORMAL
+#define GL_AUTO_NORMAL 0x0D80
+#endif
+#ifndef GL_TEXTURE_3D
+#define GL_TEXTURE_3D 0x806F
 #endif
 #ifndef GL_MODELVIEW
 #define GL_MODELVIEW 0x1700

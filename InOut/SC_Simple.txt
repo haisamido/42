@@ -42,7 +42,7 @@ NONE                        ! Flex File Name
          (Number of Joints is Number of Bodies minus one)
 ============================== Joint 0 ================================
 PASSIVE                     ! Type of joint (PASSIVE, ACTUATED, others)
-0 1                         ! Inner, outer body indices
+0 0                         ! Inner, outer body indices
 1   213   GIMBAL            ! RotDOF, Seq, GIMBAL or SPHERICAL
 0   123                     ! TrnDOF, Seq
 FALSE  FALSE  FALSE         ! RotDOF Locked
