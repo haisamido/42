@@ -380,6 +380,7 @@ long SimStep(void)
       }
       Report();  /* File Output */
       Publish(); /* Redis Publishing */
+      Subscribe(); /* Redis Subscription - just monitors */
 
       /* Exit when Stoptime is reached */
       if (SimComplete) {

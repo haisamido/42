@@ -247,6 +247,10 @@ EXTERN char PublisherType[80];
 void Publish(void);
 void CleanupRedis(void);
 
+/* Redis Subscription */
+void Subscribe(void);
+void CleanupRedisSubscription(void);
+
 #undef EXTERN
 
 /*
