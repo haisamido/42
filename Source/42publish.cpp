@@ -20,9 +20,11 @@ extern "C" {
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 #include <hiredis/hiredis.h>
 
 static redisContext *redisCtx = NULL;
+static bool configPublished = false;
 
 /* Helper function to write a 3D vector to JSON string */
 void writeVector3(std::string &buffer, const char* name, double v[3]) {
@@ -67,6 +69,124 @@ void writeKeplerianElements(std::string &buffer, struct OrbitType *O) {
         << "\"h_p\":" << O->rmin
         << "}";
     buffer += oss.str();
+}
+
+/* Helper function to publish a file to Redis */
+void PublishFileToRedis(const char* fileName) {
+    if (!redisCtx) return;
+
+    /* Build full file path */
+    std::string filePath = std::string(InOutPath) + fileName;
+
+    /* Read file content */
+    std::ifstream file(filePath);
+    if (!file.is_open()) {
+        fprintf(stderr, "Failed to open file: %s\n", filePath.c_str());
+        return;
+    }
+
+    std::string content;
+    std::string line;
+    while (std::getline(file, line)) {
+        content += line + "\n";
+    }
+    file.close();
+
+    /* Build channel name: remove .txt extension if present */
+    std::string fileNameStr(fileName);
+    size_t dotPos = fileNameStr.find(".txt");
+    if (dotPos != std::string::npos) {
+        fileNameStr = fileNameStr.substr(0, dotPos);
+    }
+    std::string channel = "fortytwo:config:" + fileNameStr;
+
+    /* Publish to Redis */
+    redisReply *reply = (redisReply*)redisCommand(redisCtx,
+                                                  "PUBLISH %s %s",
+                                                  channel.c_str(),
+                                                  content.c_str());
+    if (reply == NULL) {
+        fprintf(stderr, "Redis publish error for %s: %s\n", fileName, redisCtx->errstr);
+        return;
+    }
+    freeReplyObject(reply);
+
+    /* Also SET the key for persistence */
+    reply = (redisReply*)redisCommand(redisCtx,
+                                     "SET %s %s",
+                                     channel.c_str(),
+                                     content.c_str());
+    if (reply) freeReplyObject(reply);
+
+    printf("Published %s to %s\n", fileName, channel.c_str());
+}
+
+/* Publish configuration file to Redis */
+void PublishConfigFile(void) {
+    if (configPublished) return;  /* Only publish once */
+
+    if (!redisCtx) {
+        redisCtx = redisConnect(PublisherIp, PublisherPort);
+        if (redisCtx == NULL || redisCtx->err) {
+            if (redisCtx) {
+                fprintf(stderr, "Redis connection error: %s\n", redisCtx->errstr);
+                redisFree(redisCtx);
+                redisCtx = NULL;
+            } else {
+                fprintf(stderr, "Redis connection error: can't allocate redis context\n");
+            }
+            return;
+        }
+    }
+
+    /* Publish InOutPath to fortytwo:config:InOutPath */
+    std::string inOutPathChannel = "fortytwo:config:InOutPath";
+    std::string inOutPathValue = std::string(InOutPath);
+
+    redisReply *reply = (redisReply*)redisCommand(redisCtx,
+                                                  "PUBLISH %s %s",
+                                                  inOutPathChannel.c_str(),
+                                                  inOutPathValue.c_str());
+    if (reply == NULL) {
+        fprintf(stderr, "Redis publish error: %s\n", redisCtx->errstr);
+        redisFree(redisCtx);
+        redisCtx = NULL;
+        return;
+    }
+    freeReplyObject(reply);
+
+    /* Also SET the key for persistence */
+    reply = (redisReply*)redisCommand(redisCtx,
+                                     "SET %s %s",
+                                     inOutPathChannel.c_str(),
+                                     inOutPathValue.c_str());
+    if (reply) freeReplyObject(reply);
+
+    printf("Published InOutPath to %s: %s\n", inOutPathChannel.c_str(), inOutPathValue.c_str());
+
+    /* Publish Inp_Sim.txt */
+    PublishFileToRedis("Inp_Sim.txt");
+
+    /* Publish Command Script file */
+    if (strlen(CmdFileName) > 0) {
+        PublishFileToRedis(CmdFileName);
+    }
+
+    /* Publish all Orbit files */
+    for (long Iorb = 0; Iorb < Norb; Iorb++) {
+        if (Orb[Iorb].Exists && strlen(Orb[Iorb].FileName) > 0) {
+            PublishFileToRedis(Orb[Iorb].FileName);
+        }
+    }
+
+    /* Publish all Spacecraft files */
+    for (long Isc = 0; Isc < Nsc; Isc++) {
+        if (SC[Isc].Exists && strlen(SC[Isc].FileName) > 0) {
+            PublishFileToRedis(SC[Isc].FileName);
+        }
+    }
+
+    configPublished = true;
 }
 
 /* Publish spacecraft state data to Redis */
@@ -239,6 +359,7 @@ void PublishRedis(void) {
 /* Main publishing function called from 42exec */
 extern "C" void Publish(void) {
     if (strcmp(PublisherType, "Redis") == 0) {
+        PublishConfigFile();  /* Publish config once at start */
         PublishRedis();
     }
 }
