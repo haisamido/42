@@ -239,6 +239,14 @@ void NOS3Time(long *year, long *day_of_year, long *month, long *day,
 void InterProcessComm(void);
 void InitInterProcessComm(void);
 
+/* Redis Publishing */
+EXTERN char PublisherIp[40];
+EXTERN long PublisherPort;
+EXTERN char PublisherType[80];
+
+void Publish(void);
+void CleanupRedis(void);
+
 #undef EXTERN
 
 /*

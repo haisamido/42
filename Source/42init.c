@@ -4690,6 +4690,11 @@ void InitSim(int argc, char **argv)
          GroundStation[i].World = DecodeString(response2);
       }
 
+/* .. Redis Publisher Configuration */
+      fscanf(infile,"%[^\n] %[\n]",junk,&newline);
+      fscanf(infile,"%s %ld %[^\n] %[\n]",PublisherIp,&PublisherPort,junk,&newline);
+      fscanf(infile,"%s %[^\n] %[\n]",PublisherType,junk,&newline);
+
       fclose(infile);
       
 /* .. Load Materials */

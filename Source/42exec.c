@@ -345,6 +345,7 @@ long SimStep(void)
             }
          }
          Report();  /* File Output */
+         Publish(); /* Redis Publishing */
       }
 
       ReportProgress();
@@ -378,6 +379,7 @@ long SimStep(void)
          }
       }
       Report();  /* File Output */
+      Publish(); /* Redis Publishing */
 
       /* Exit when Stoptime is reached */
       if (SimComplete) {

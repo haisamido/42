@@ -74,7 +74,7 @@ META = $(PROJDIR)MetaCode/
 
 ifeq ($(42PLATFORM),__APPLE__)
    # Mac Macros
-   CINC = -I /usr/include -I /usr/local/include
+   CINC = -I /usr/include -I /usr/local/include -I /opt/homebrew/include
    EXTERNDIR =
    # ARCHFLAG = -arch i386
    # ARCHFLAG = -arch x86_64
@@ -86,25 +86,25 @@ ifeq ($(42PLATFORM),__APPLE__)
    #GLUT_OR_GLFW = _USE_GLFW_
    GLUT_OR_GLFW = _USE_GLUT_
 
-   LFLAGS = 
+   LFLAGS = -L /opt/homebrew/lib
    ifneq ($(strip $(GUIFLAG)),)
       GLINC = -I /System/Library/Frameworks/OpenGL.framework/Headers/ -I /System/Library/Frameworks/GLUT.framework/Headers/
       ifeq ($(strip $(GLUT_OR_GLFW)),_USE_GLUT_)
-         LIBS = -framework System -framework Carbon -framework OpenGL -framework GLUT
+         LIBS = -framework System -framework Carbon -framework OpenGL -framework GLUT -lhiredis -lstdc++ -ljansson -lpthread
          GUIOBJ = $(OBJ)42gl.o $(OBJ)42glut.o $(OBJ)glkit.o $(OBJ)42gpgpu.o
          GUI_LIB = -D _USE_GLUT_
       else
-         LIBS = -lglfw -framework System -framework Carbon -framework OpenGL -framework GLUT
+         LIBS = -lglfw -framework System -framework Carbon -framework OpenGL -framework GLUT -lhiredis -lstdc++ -ljansson -lpthread
          GUIOBJ = $(OBJ)42gl.o $(OBJ)42glfw.o $(OBJ)glkit.o $(OBJ)42gpgpu.o
          GUI_LIB = -D _USE_GLFW_
       endif
    else
-      GLINC = 
-      LIBS = 
-      GUIOBJ = 
+      GLINC =
+      LIBS = -lhiredis -lstdc++ -ljansson -lpthread
+      GUIOBJ =
    endif
    NOS3OBJ = $(OBJ)42nos3.o
-   XWARN = 
+   XWARN =
    EXENAME = 42
    CC = gcc
 endif
@@ -218,7 +218,7 @@ endif
 42OBJ = $(OBJ)42main.o $(OBJ)42exec.o $(OBJ)42actuators.o $(OBJ)42cmd.o \
 $(OBJ)42dynamics.o $(OBJ)42environs.o $(OBJ)42ephem.o $(OBJ)42fsw.o \
 $(OBJ)42init.o $(OBJ)42ipc.o $(OBJ)42jitter.o $(OBJ)42joints.o \
-$(OBJ)42optics.o $(OBJ)42perturb.o $(OBJ)42report.o $(OBJ)42sensors.o
+$(OBJ)42optics.o $(OBJ)42perturb.o $(OBJ)42report.o $(OBJ)42report_redis.o $(OBJ)42sensors.o
 
 KITOBJ = $(OBJ)dcmkit.o $(OBJ)envkit.o $(OBJ)fswkit.o  $(OBJ)iokit.o \
 $(OBJ)mathkit.o $(OBJ)meshkit.o $(OBJ)nrlmsise00kit.o $(OBJ)orbkit.o \
@@ -308,6 +308,9 @@ $(OBJ)42perturb.o   : $(SRC)42perturb.c $(INC)42.h
 
 $(OBJ)42report.o    : $(SRC)42report.c $(INC)42.h
 	$(CC) $(CFLAGS) -c $(SRC)42report.c -o $(OBJ)42report.o
+
+$(OBJ)42report_redis.o : $(SRC)42report_redis.cpp $(INC)42.h
+	g++ -std=c++11 -g -O0 -fpic -Wall -Wshadow -Wno-deprecated $(GLINC) $(CINC) -I $(INC) -I $(KITINC) -I $(KITSRC) $(ARCHFLAG) $(GUIFLAG) $(GUI_LIB) $(SHADERFLAG) -c $(SRC)42report_redis.cpp -o $(OBJ)42report_redis.o
 
 $(OBJ)42sensors.o   : $(SRC)42sensors.c $(INC)42.h $(INC)Ac.h $(INC)AcTypes.h
 	$(CC) $(CFLAGS) -c $(SRC)42sensors.c -o $(OBJ)42sensors.o
