@@ -19,10 +19,12 @@ extern "C" {
 
 #include <string>
 #include <vector>
+#include <map>
 #include <cstring>
 #include <cerrno>
 #include <sys/select.h>
 #include <hiredis/hiredis.h>
+#include <jansson.h>
 
 static redisContext *subscribeCtx = NULL;
 static redisContext *dataCtx = NULL;
@@ -30,7 +32,7 @@ static bool subscribed = false;
 static std::vector<std::string> subscriptionPatterns;
 
 /* Storage for config data retrieved from Redis */
-static std::string storedInpSim;
+static std::map<std::string, std::string> configCache;
 
 /* Message handler callback */
 void HandleSubscriptionMessage(redisReply *reply) {
@@ -53,18 +55,102 @@ void HandleSubscriptionMessage(redisReply *reply) {
             return;
         }
 
+        /* Parse JSON payload */
+        json_error_t error;
+        json_t *root = json_loads(payload.c_str(), 0, &error);
+        if (!root) {
+            fprintf(stderr, "[REDIS SUB] JSON parse error: %s\n", error.text);
+            /* Fallback: print raw payload */
+            fprintf(stdout, "\n========================================\n");
+            fprintf(stdout, "[REDIS SUB] Message received (raw)\n");
+            fprintf(stdout, "[REDIS SUB] Channel: %s\n", channel.c_str());
+            fprintf(stdout, "========================================\n");
+            fprintf(stdout, "Content (%zu bytes):\n%s\n", payload.length(), payload.c_str());
+            fprintf(stdout, "========================================\n\n");
+            fflush(stdout);
+            return;
+        }
+
+        /* Extract content and metadata */
+        json_t *content = json_object_get(root, "content");
+        json_t *metadata = json_object_get(root, "metadata");
+
+        if (!content || !json_is_string(content)) {
+            fprintf(stderr, "[REDIS SUB] Invalid JSON structure: missing 'content' field\n");
+            json_decref(root);
+            return;
+        }
+
+        const char *contentStr = json_string_value(content);
+
         /* Print received message to console */
         fprintf(stdout, "\n========================================\n");
         fprintf(stdout, "[REDIS SUB] Message received\n");
         fprintf(stdout, "[REDIS SUB] Channel: %s\n", channel.c_str());
         fprintf(stdout, "========================================\n");
-        fprintf(stdout, "Content (%zu bytes):\n%s\n", payload.length(), payload.c_str());
+
+        /* Print metadata if available */
+        if (metadata && json_is_object(metadata)) {
+            fprintf(stdout, "Metadata:\n");
+            json_t *mtime = json_object_get(metadata, "mtime");
+            json_t *ctime = json_object_get(metadata, "ctime");
+            json_t *atime = json_object_get(metadata, "atime");
+            json_t *inserted_time = json_object_get(metadata, "inserted_time");
+
+            if (mtime && json_is_string(mtime))
+                fprintf(stdout, "  mtime: %s\n", json_string_value(mtime));
+            if (ctime && json_is_string(ctime))
+                fprintf(stdout, "  ctime: %s\n", json_string_value(ctime));
+            if (atime && json_is_string(atime))
+                fprintf(stdout, "  atime: %s\n", json_string_value(atime));
+            if (inserted_time && json_is_string(inserted_time))
+                fprintf(stdout, "  inserted_time: %s\n", json_string_value(inserted_time));
+            fprintf(stdout, "========================================\n");
+        }
+
+        fprintf(stdout, "Content (%zu bytes):\n%s\n", strlen(contentStr), contentStr);
         fprintf(stdout, "========================================\n\n");
         fflush(stdout);
+
+        json_decref(root);
     }
 }
 
-/* Fetch config data from Redis for initialization */
+/* Helper function to fetch a single config file from Redis */
+static bool FetchSingleConfig(const char* configName) {
+    if (!dataCtx) return false;
+
+    /* Build channel name */
+    std::string channel = "fortytwo:config:" + std::string(configName);
+
+    /* Fetch config if it exists */
+    redisReply *reply = (redisReply*)redisCommand(dataCtx, "GET %s", channel.c_str());
+    if (reply && reply->type == REDIS_REPLY_STRING) {
+        /* Parse JSON to extract content */
+        json_error_t error;
+        json_t *root = json_loads(reply->str, 0, &error);
+        if (root) {
+            json_t *content = json_object_get(root, "content");
+            if (content && json_is_string(content)) {
+                configCache[configName] = json_string_value(content);
+                printf("[REDIS] Fetched %s config from Redis (%zu bytes)\n",
+                       configName, configCache[configName].length());
+                json_decref(root);
+                freeReplyObject(reply);
+                return true;
+            } else {
+                fprintf(stderr, "[REDIS] Invalid JSON structure in %s: missing 'content' field\n", configName);
+            }
+            json_decref(root);
+        } else {
+            fprintf(stderr, "[REDIS] JSON parse error for %s: %s\n", configName, error.text);
+        }
+    }
+    if (reply) freeReplyObject(reply);
+    return false;
+}
+
+/* Fetch all config data from Redis for initialization */
 void FetchConfigFromRedis(const char* redisHost, int redisPort) {
     /* Create a separate connection for data fetching */
     if (!dataCtx) {
@@ -79,13 +165,11 @@ void FetchConfigFromRedis(const char* redisHost, int redisPort) {
         }
     }
 
-    /* Fetch Inp_Sim config if it exists */
-    redisReply *reply = (redisReply*)redisCommand(dataCtx, "GET fortytwo:config:Inp_Sim");
-    if (reply && reply->type == REDIS_REPLY_STRING) {
-        storedInpSim = std::string(reply->str, reply->len);
-        printf("[REDIS] Fetched Inp_Sim config from Redis (%zu bytes)\n", storedInpSim.length());
-    }
-    if (reply) freeReplyObject(reply);
+    /* Fetch all known config files */
+    FetchSingleConfig("Inp_Sim");
+    FetchSingleConfig("InOutPath");
+
+    /* We'll fetch orbit and spacecraft configs dynamically as they are requested */
 }
 
 /* Initialize Redis subscription - subscribes once to config channels */
@@ -193,26 +277,49 @@ extern "C" void Subscribe(void) {
     }
 }
 
-/* Check if Inp_Sim config is available from Redis */
-extern "C" int HasInpSimFromRedis(void) {
-    return !storedInpSim.empty();
+/* Generic function to check if a config file is available from Redis */
+extern "C" int HasConfigFromRedis(const char* configName) {
+    /* Try to fetch if not in cache yet */
+    if (configCache.find(configName) == configCache.end() && dataCtx) {
+        FetchSingleConfig(configName);
+    }
+    return configCache.find(configName) != configCache.end();
 }
 
-/* Get Inp_Sim config from Redis as FILE* */
-extern "C" FILE* GetInpSimFromRedis(void) {
-    if (storedInpSim.empty()) {
+/* Generic function to get config from Redis as FILE* */
+extern "C" FILE* GetConfigFromRedis(const char* configName) {
+    /* Try to fetch if not in cache yet */
+    if (configCache.find(configName) == configCache.end() && dataCtx) {
+        if (!FetchSingleConfig(configName)) {
+            return NULL;
+        }
+    }
+
+    /* Check if we have the config */
+    if (configCache.find(configName) == configCache.end()) {
         return NULL;
     }
+
+    const std::string& content = configCache[configName];
 
     /* Create a FILE* from the in-memory string */
-    FILE *fp = fmemopen((void*)storedInpSim.c_str(), storedInpSim.length(), "r");
+    FILE *fp = fmemopen((void*)content.c_str(), content.length(), "r");
     if (fp == NULL) {
-        fprintf(stderr, "Failed to create memory stream for Inp_Sim: %s\n", strerror(errno));
+        fprintf(stderr, "Failed to create memory stream for %s: %s\n", configName, strerror(errno));
         return NULL;
     }
 
-    printf("[REDIS] Providing Inp_Sim from Redis memory (%zu bytes)\n", storedInpSim.length());
+    printf("[REDIS] Providing %s from Redis memory (%zu bytes)\n", configName, content.length());
     return fp;
+}
+
+/* Backwards compatibility wrappers for Inp_Sim */
+extern "C" int HasInpSimFromRedis(void) {
+    return HasConfigFromRedis("Inp_Sim");
+}
+
+extern "C" FILE* GetInpSimFromRedis(void) {
+    return GetConfigFromRedis("Inp_Sim");
 }
 
 /* Cleanup Redis subscription connection on exit */
@@ -232,5 +339,5 @@ extern "C" void CleanupRedisSubscription(void) {
     }
 
     subscribed = false;
-    storedInpSim.clear();
+    configCache.clear();
 }

@@ -174,7 +174,7 @@ void CmdInterpreter(void)
          if (!strcmp(CmdFileName,"NONE"))
             CmdFileActive = 0;
          else {
-            CmdFile = FileOpen(InOutPath,CmdFileName,"rt");
+            CmdFile = FileOpenWithRedis(InOutPath,CmdFileName,"rt");
             fgets(CmdLine,512,CmdFile);
             fgets(CmdLine,512,CmdFile);
             sscanf(CmdLine,"%lf",&CmdTime);

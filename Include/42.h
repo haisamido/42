@@ -250,6 +250,11 @@ void CleanupRedis(void);
 /* Redis Subscription */
 void Subscribe(void);
 void CleanupRedisSubscription(void);
+int HasConfigFromRedis(const char* configName);
+FILE* GetConfigFromRedis(const char* configName);
+int HasInpSimFromRedis(void);
+FILE* GetInpSimFromRedis(void);
+FILE* FileOpenWithRedis(const char *Path, const char *File, const char *Mode);
 
 #undef EXTERN
 

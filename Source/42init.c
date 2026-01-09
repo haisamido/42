@@ -22,6 +22,39 @@
 */
 
 /**********************************************************************/
+/* Helper function to open config files with Redis fallback          */
+/**********************************************************************/
+FILE* FileOpenWithRedis(const char *Path, const char *File, const char *Mode)
+{
+      FILE *infile = NULL;
+      char fileNameNoExt[512];
+      char *dotPos;
+
+      /* Only check Redis for read mode */
+      if (strcmp(Mode, "r") == 0 || strcmp(Mode, "rt") == 0) {
+         /* Extract filename without extension for Redis key */
+         strncpy(fileNameNoExt, File, sizeof(fileNameNoExt) - 1);
+         fileNameNoExt[sizeof(fileNameNoExt) - 1] = '\0';
+
+         dotPos = strstr(fileNameNoExt, ".txt");
+         if (dotPos != NULL) *dotPos = '\0';
+
+         /* Try Redis first */
+         if (HasConfigFromRedis(fileNameNoExt)) {
+            infile = GetConfigFromRedis(fileNameNoExt);
+            if (infile != NULL) {
+               return infile;
+            }
+            /* If Redis fetch failed, fall through to file */
+            printf("[REDIS] Failed to get %s from Redis, falling back to file\n", fileNameNoExt);
+         }
+      }
+
+      /* Fall back to file system */
+      return FileOpen(Path, File, Mode);
+}
+
+/**********************************************************************/
 long DecodeString(char *s)
 {
 
@@ -492,7 +525,7 @@ void InitOrbit(struct OrbitType *O)
       long NodeYear,NodeMonth,NodeDay,NodeHour,NodeMin;
       double NodeSec;
 
-      infile = FileOpen(InOutPath,O->FileName,"r");
+      infile = FileOpenWithRedis(InOutPath,O->FileName,"r");
 
 /* .. Orbit Parameters */
       O->Epoch = DynTime;
@@ -1926,7 +1959,7 @@ void InitSpacecraft(struct SCType *S)
       struct PsfType *PSF;
       long OldNmesh;
 
-      infile=FileOpen(InOutPath,S->FileName,"r");
+      infile=FileOpenWithRedis(InOutPath,S->FileName,"r");
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);
       fscanf(infile,"\"%[^\"]\" %[^\n] %[\n]",S->Label,junk,&newline);
@@ -2925,7 +2958,7 @@ void LoadTdrs(void)
       long i;
 
 /* .. Initialize TDRS */
-      infile = FileOpen(InOutPath,"Inp_TDRS.txt","r");
+      infile = FileOpenWithRedis(InOutPath,"Inp_TDRS.txt","r");
 /* .. 42 TDRS Configuration File */
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);
 
@@ -3987,7 +4020,7 @@ void LoadRegions(void)
       double MagR;
       double VelW[3];
 
-      infile = FileOpen(InOutPath,"Inp_Region.txt","rt");
+      infile = FileOpenWithRedis(InOutPath,"Inp_Region.txt","rt");
 
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);
       fscanf(infile,"%ld %[^\n] %[\n]",&Nrgn,junk,&newline);
@@ -4548,8 +4581,16 @@ void InitSim(int argc, char **argv)
       if (argc > 1) sprintf(InOutPath,"%s/",argv[1]);
       if (argc > 2) sprintf(ModelPath,"%s/",argv[2]);
 
-/* .. Read from file Inp_Sim.txt */
-      infile=FileOpen(InOutPath,"Inp_Sim.txt","r");
+/* .. Read from file Inp_Sim.txt or from Redis */
+      if (HasInpSimFromRedis()) {
+         infile = GetInpSimFromRedis();
+         if (infile == NULL) {
+            printf("Failed to get Inp_Sim from Redis, falling back to file\n");
+            infile=FileOpen(InOutPath,"Inp_Sim.txt","r");
+         }
+      } else {
+         infile=FileOpen(InOutPath,"Inp_Sim.txt","r");
+      }
 
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);
       fscanf(infile,"%[^\n] %[\n]",junk,&newline);

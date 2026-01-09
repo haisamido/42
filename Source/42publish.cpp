@@ -21,7 +21,10 @@ extern "C" {
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <sys/stat.h>
+#include <time.h>
 #include <hiredis/hiredis.h>
+#include <jansson.h>
 
 static redisContext *redisCtx = NULL;
 static bool configPublished = false;
@@ -71,12 +74,19 @@ void writeKeplerianElements(std::string &buffer, struct OrbitType *O) {
     buffer += oss.str();
 }
 
-/* Helper function to publish a file to Redis */
+/* Helper function to publish a file to Redis with JSON metadata */
 void PublishFileToRedis(const char* fileName) {
     if (!redisCtx) return;
 
     /* Build full file path */
     std::string filePath = std::string(InOutPath) + fileName;
+
+    /* Get file metadata using stat */
+    struct stat fileStat;
+    if (stat(filePath.c_str(), &fileStat) != 0) {
+        fprintf(stderr, "Failed to stat file: %s\n", filePath.c_str());
+        return;
+    }
 
     /* Read file content */
     std::ifstream file(filePath);
@@ -92,6 +102,48 @@ void PublishFileToRedis(const char* fileName) {
     }
     file.close();
 
+    /* Build JSON object with content and metadata */
+    json_t *root = json_object();
+    json_object_set_new(root, "content", json_string(content.c_str()));
+
+    /* Create metadata object */
+    json_t *metadata = json_object();
+
+    /* Format timestamps as ISO 8601 strings */
+    char timeBuffer[64];
+    struct tm *timeInfo;
+
+    /* mtime - modification time */
+    timeInfo = gmtime(&fileStat.st_mtime);
+    strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+    json_object_set_new(metadata, "mtime", json_string(timeBuffer));
+
+    /* ctime - creation/change time */
+    timeInfo = gmtime(&fileStat.st_ctime);
+    strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+    json_object_set_new(metadata, "ctime", json_string(timeBuffer));
+
+    /* atime - access time */
+    timeInfo = gmtime(&fileStat.st_atime);
+    strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+    json_object_set_new(metadata, "atime", json_string(timeBuffer));
+
+    /* inserted_time - current time */
+    time_t now = time(NULL);
+    timeInfo = gmtime(&now);
+    strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+    json_object_set_new(metadata, "inserted_time", json_string(timeBuffer));
+
+    json_object_set_new(root, "metadata", metadata);
+
+    /* Convert JSON to string */
+    char *jsonString = json_dumps(root, JSON_COMPACT);
+    if (!jsonString) {
+        fprintf(stderr, "Failed to create JSON for %s\n", fileName);
+        json_decref(root);
+        return;
+    }
+
     /* Build channel name: remove .txt extension if present */
     std::string fileNameStr(fileName);
     size_t dotPos = fileNameStr.find(".txt");
@@ -104,9 +156,11 @@ void PublishFileToRedis(const char* fileName) {
     redisReply *reply = (redisReply*)redisCommand(redisCtx,
                                                   "PUBLISH %s %s",
                                                   channel.c_str(),
-                                                  content.c_str());
+                                                  jsonString);
     if (reply == NULL) {
         fprintf(stderr, "Redis publish error for %s: %s\n", fileName, redisCtx->errstr);
+        free(jsonString);
+        json_decref(root);
         return;
     }
     freeReplyObject(reply);
@@ -115,10 +169,13 @@ void PublishFileToRedis(const char* fileName) {
     reply = (redisReply*)redisCommand(redisCtx,
                                      "SET %s %s",
                                      channel.c_str(),
-                                     content.c_str());
+                                     jsonString);
     if (reply) freeReplyObject(reply);
 
-    printf("Published %s to %s\n", fileName, channel.c_str());
+    printf("Published %s to %s (with metadata)\n", fileName, channel.c_str());
+
+    free(jsonString);
+    json_decref(root);
 }
 
 /* Publish configuration file to Redis */
