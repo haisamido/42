@@ -23,6 +23,9 @@ extern "C" {
 #include <fstream>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <limits.h>
 #include <hiredis/hiredis.h>
 #include <jansson.h>
 
@@ -81,6 +84,27 @@ void PublishFileToRedis(const char* fileName) {
     /* Build full file path */
     std::string filePath = std::string(InOutPath) + fileName;
 
+    /* Get absolute path, hostname, and username once at the beginning */
+    char absolutePath[4096];
+    std::string pathStr;
+    if (realpath(filePath.c_str(), absolutePath) != NULL) {
+        pathStr = std::string(absolutePath);
+    } else {
+        pathStr = filePath;
+    }
+
+    char hostname[256];
+    std::string hostnameStr = "unknown";
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        hostnameStr = std::string(hostname);
+    }
+
+    const char* username = getenv("USER");
+    if (username == NULL) {
+        username = getenv("USERNAME");
+    }
+    std::string usernameStr = (username != NULL) ? std::string(username) : "unknown";
+
     /* Get file metadata using stat */
     struct stat fileStat;
     if (stat(filePath.c_str(), &fileStat) != 0) {
@@ -133,6 +157,12 @@ void PublishFileToRedis(const char* fileName) {
     timeInfo = gmtime(&now);
     strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
     json_object_set_new(metadata, "inserted_time", json_string(timeBuffer));
+
+    /* Add URI source, hostname, and username to metadata */
+    std::string uriSource = "file://" + pathStr;
+    json_object_set_new(metadata, "uri_source", json_string(uriSource.c_str()));
+    json_object_set_new(metadata, "hostname", json_string(hostnameStr.c_str()));
+    json_object_set_new(metadata, "username", json_string(usernameStr.c_str()));
 
     json_object_set_new(root, "metadata", metadata);
 
@@ -197,19 +227,74 @@ void PublishConfigFile(void) {
     }
 
     /* Publish InOutPath to <prefix>:config:InOutPath with JSON structure */
-    std::string inOutPathChannel = std::string(ChannelPrefix) + ":config:InOutPath";
+    /* Get hostname and username for channel name */
+    char hostname[256];
+    std::string hostnameStr = "unknown";
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        hostnameStr = std::string(hostname);
+    }
+
+    const char* username = getenv("USER");
+    if (username == NULL) {
+        username = getenv("USERNAME");
+    }
+    std::string usernameStr = (username != NULL) ? std::string(username) : "unknown";
+
     std::string inOutPathValue = std::string(InOutPath);
+
+    /* Get absolute path for metadata */
+    char absolutePath[4096];
+    std::string pathStr;
+    if (realpath(inOutPathValue.c_str(), absolutePath) != NULL) {
+        pathStr = std::string(absolutePath);
+    } else {
+        pathStr = inOutPathValue;
+    }
+
+    std::string inOutPathChannel = std::string(ChannelPrefix) + ":config:InOutPath";
 
     /* Build JSON object with content and metadata */
     json_t *root = json_object();
     json_object_set_new(root, "content", json_string(inOutPathValue.c_str()));
 
     json_t *metadata = json_object();
-    time_t now = time(NULL);
-    struct tm *timeInfo = gmtime(&now);
+
+    /* Get directory metadata using stat */
+    struct stat dirStat;
     char timeBuffer[64];
+    struct tm *timeInfo;
+
+    if (stat(pathStr.c_str(), &dirStat) == 0) {
+        /* Format timestamps as ISO 8601 strings */
+
+        /* mtime - modification time */
+        timeInfo = gmtime(&dirStat.st_mtime);
+        strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+        json_object_set_new(metadata, "mtime", json_string(timeBuffer));
+
+        /* ctime - creation/change time */
+        timeInfo = gmtime(&dirStat.st_ctime);
+        strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+        json_object_set_new(metadata, "ctime", json_string(timeBuffer));
+
+        /* atime - access time */
+        timeInfo = gmtime(&dirStat.st_atime);
+        strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+        json_object_set_new(metadata, "atime", json_string(timeBuffer));
+    }
+
+    /* inserted_time - current time */
+    time_t now = time(NULL);
+    timeInfo = gmtime(&now);
     strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
     json_object_set_new(metadata, "inserted_time", json_string(timeBuffer));
+
+    /* Add URI source, hostname, and username to metadata (already obtained above) */
+    std::string uriSource = "file://" + pathStr;
+    json_object_set_new(metadata, "uri_source", json_string(uriSource.c_str()));
+    json_object_set_new(metadata, "hostname", json_string(hostnameStr.c_str()));
+    json_object_set_new(metadata, "username", json_string(usernameStr.c_str()));
+
     json_object_set_new(root, "metadata", metadata);
 
     char *jsonString = json_dumps(root, JSON_COMPACT);
