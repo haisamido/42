@@ -196,16 +196,32 @@ void PublishConfigFile(void) {
         }
     }
 
-    /* Publish InOutPath to <prefix>:config:InOutPath */
+    /* Publish InOutPath to <prefix>:config:InOutPath with JSON structure */
     std::string inOutPathChannel = std::string(RedisPrefix) + ":config:InOutPath";
     std::string inOutPathValue = std::string(InOutPath);
+
+    /* Build JSON object with content and metadata */
+    json_t *root = json_object();
+    json_object_set_new(root, "content", json_string(inOutPathValue.c_str()));
+
+    json_t *metadata = json_object();
+    time_t now = time(NULL);
+    struct tm *timeInfo = gmtime(&now);
+    char timeBuffer[64];
+    strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", timeInfo);
+    json_object_set_new(metadata, "inserted_time", json_string(timeBuffer));
+    json_object_set_new(root, "metadata", metadata);
+
+    char *jsonString = json_dumps(root, JSON_COMPACT);
 
     redisReply *reply = (redisReply*)redisCommand(redisCtx,
                                                   "PUBLISH %s %s",
                                                   inOutPathChannel.c_str(),
-                                                  inOutPathValue.c_str());
+                                                  jsonString);
     if (reply == NULL) {
         fprintf(stderr, "Redis publish error: %s\n", redisCtx->errstr);
+        free(jsonString);
+        json_decref(root);
         redisFree(redisCtx);
         redisCtx = NULL;
         return;
@@ -216,10 +232,13 @@ void PublishConfigFile(void) {
     reply = (redisReply*)redisCommand(redisCtx,
                                      "SET %s %s",
                                      inOutPathChannel.c_str(),
-                                     inOutPathValue.c_str());
+                                     jsonString);
     if (reply) freeReplyObject(reply);
 
     printf("Published InOutPath to %s: %s\n", inOutPathChannel.c_str(), inOutPathValue.c_str());
+
+    free(jsonString);
+    json_decref(root);
 
     /* Publish Inp_Sim.txt */
     PublishFileToRedis("Inp_Sim.txt");
