@@ -121,7 +121,7 @@ static bool FetchSingleConfig(const char* configName) {
     if (!dataCtx) return false;
 
     /* Build channel name */
-    std::string channel = std::string(RedisPrefix) + ":config:" + std::string(configName);
+    std::string channel = std::string(ChannelPrefix) + ":config:" + std::string(configName);
 
     /* Fetch config if it exists */
     redisReply *reply = (redisReply*)redisCommand(dataCtx, "GET %s", channel.c_str());
@@ -211,7 +211,7 @@ void InitializeSubscription(void) {
 
     /* Subscribe only to config channels */
     subscriptionPatterns.clear();
-    subscriptionPatterns.push_back(std::string(RedisPrefix) + ":config:*");
+    subscriptionPatterns.push_back(std::string(ChannelPrefix) + ":config:*");
 
     /* Execute pattern subscription */
     redisReply *reply = (redisReply*)redisCommand(subscribeCtx,

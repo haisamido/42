@@ -150,7 +150,7 @@ void PublishFileToRedis(const char* fileName) {
     if (dotPos != std::string::npos) {
         fileNameStr = fileNameStr.substr(0, dotPos);
     }
-    std::string channel = std::string(RedisPrefix) + ":config:" + fileNameStr;
+    std::string channel = std::string(ChannelPrefix) + ":config:" + fileNameStr;
 
     /* Publish to Redis */
     redisReply *reply = (redisReply*)redisCommand(redisCtx,
@@ -197,7 +197,7 @@ void PublishConfigFile(void) {
     }
 
     /* Publish InOutPath to <prefix>:config:InOutPath with JSON structure */
-    std::string inOutPathChannel = std::string(RedisPrefix) + ":config:InOutPath";
+    std::string inOutPathChannel = std::string(ChannelPrefix) + ":config:InOutPath";
     std::string inOutPathValue = std::string(InOutPath);
 
     /* Build JSON object with content and metadata */
@@ -338,7 +338,7 @@ void PublishRedis(void) {
         payload += "]}";
 
         /* Build channel name */
-        std::string channel = std::string(RedisPrefix) + ":astrodynamics:spacecraft:" +
+        std::string channel = std::string(ChannelPrefix) + ":astrodynamics:spacecraft:" +
                              std::string(S->Label) + ":state:current";
 
         /* Publish to Redis */
@@ -384,7 +384,7 @@ void PublishRedis(void) {
         if (dotPos != std::string::npos) {
             orbName = orbName.substr(0, dotPos);
         }
-        std::string channel = std::string(RedisPrefix) + ":astrodynamics:orbits:" + orbName + ":state:current";
+        std::string channel = std::string(ChannelPrefix) + ":astrodynamics:orbits:" + orbName + ":state:current";
 
         redisReply *reply = (redisReply*)redisCommand(redisCtx,
                                                       "PUBLISH %s %s",
@@ -420,7 +420,7 @@ void PublishRedis(void) {
         payload += oss.str();
         payload += "}";
 
-        std::string channel = std::string(RedisPrefix) + ":astrodynamics:worlds:" +
+        std::string channel = std::string(ChannelPrefix) + ":astrodynamics:worlds:" +
                              std::string(W->Name) + ":state:current";
 
         redisReply *reply = (redisReply*)redisCommand(redisCtx,
