@@ -4578,8 +4578,10 @@ void InitSim(int argc, char **argv)
       
       sprintf(InOutPath,"InOut/");
       sprintf(ModelPath,"Model/");
+      sprintf(RedisPrefix,"fortytwo");  /* Default Redis channel prefix */
       if (argc > 1) sprintf(InOutPath,"%s/",argv[1]);
       if (argc > 2) sprintf(ModelPath,"%s/",argv[2]);
+      if (argc > 3) sprintf(RedisPrefix,"%s",argv[3]);
 
 /* .. Read from file Inp_Sim.txt or from Redis */
       if (HasInpSimFromRedis()) {

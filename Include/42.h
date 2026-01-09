@@ -243,6 +243,7 @@ void InitInterProcessComm(void);
 EXTERN char PublisherIp[40];
 EXTERN long PublisherPort;
 EXTERN char PublisherType[80];
+EXTERN char RedisPrefix[80];
 
 void Publish(void);
 void CleanupRedis(void);

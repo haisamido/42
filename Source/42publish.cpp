@@ -150,7 +150,7 @@ void PublishFileToRedis(const char* fileName) {
     if (dotPos != std::string::npos) {
         fileNameStr = fileNameStr.substr(0, dotPos);
     }
-    std::string channel = "fortytwo:config:" + fileNameStr;
+    std::string channel = std::string(RedisPrefix) + ":config:" + fileNameStr;
 
     /* Publish to Redis */
     redisReply *reply = (redisReply*)redisCommand(redisCtx,
@@ -196,8 +196,8 @@ void PublishConfigFile(void) {
         }
     }
 
-    /* Publish InOutPath to fortytwo:config:InOutPath */
-    std::string inOutPathChannel = "fortytwo:config:InOutPath";
+    /* Publish InOutPath to <prefix>:config:InOutPath */
+    std::string inOutPathChannel = std::string(RedisPrefix) + ":config:InOutPath";
     std::string inOutPathValue = std::string(InOutPath);
 
     redisReply *reply = (redisReply*)redisCommand(redisCtx,
@@ -319,7 +319,7 @@ void PublishRedis(void) {
         payload += "]}";
 
         /* Build channel name */
-        std::string channel = "fortytwo:astrodynamics:spacecraft:" +
+        std::string channel = std::string(RedisPrefix) + ":astrodynamics:spacecraft:" +
                              std::string(S->Label) + ":state:current";
 
         /* Publish to Redis */
@@ -359,9 +359,13 @@ void PublishRedis(void) {
         writeKeplerianElements(payload, O);
         payload += "}}";
 
-        std::ostringstream channelStream;
-        channelStream << "fortytwo:astrodynamics:orbits:Orb" << Io << ":state:current";
-        std::string channel = channelStream.str();
+        /* Build channel name using orbit FileName without .txt extension */
+        std::string orbName(O->FileName);
+        size_t dotPos = orbName.find(".txt");
+        if (dotPos != std::string::npos) {
+            orbName = orbName.substr(0, dotPos);
+        }
+        std::string channel = std::string(RedisPrefix) + ":astrodynamics:orbits:" + orbName + ":state:current";
 
         redisReply *reply = (redisReply*)redisCommand(redisCtx,
                                                       "PUBLISH %s %s",
@@ -397,7 +401,7 @@ void PublishRedis(void) {
         payload += oss.str();
         payload += "}";
 
-        std::string channel = "fortytwo:astrodynamics:worlds:" +
+        std::string channel = std::string(RedisPrefix) + ":astrodynamics:worlds:" +
                              std::string(W->Name) + ":state:current";
 
         redisReply *reply = (redisReply*)redisCommand(redisCtx,
