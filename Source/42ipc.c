@@ -120,6 +120,11 @@ void *InitSingleIPC(void *arg)
             I->ConnStatus = CONN_STATUS_FAILED;
          }
       }
+      else {
+         /* Mode is OFF or unknown - skip this IPC entry */
+         printf("IPC[%ld] Mode is OFF, skipping (%s:%ld)\n", Iipc, I->HostName, I->Port);
+         I->ConnStatus = CONN_STATUS_CONNECTED; /* Mark as "done" so it doesn't block */
+      }
 
       I->Init = 1;
       return NULL;
@@ -253,6 +258,11 @@ void InitInterProcessComm(void)
             I->SocketRole = IPC_CLIENT;
             I->Socket = InitSocketClient(I->HostName, I->Port, I->AllowBlocking);
             I->ConnStatus = CONN_STATUS_CONNECTED;
+         }
+         else {
+            /* Mode is OFF or unknown - skip this IPC entry */
+            printf("IPC[%ld] Mode is OFF, skipping (%s:%ld)\n", Iipc, I->HostName, I->Port);
+            I->ConnStatus = CONN_STATUS_CONNECTED; /* Mark as "done" so it doesn't block */
          }
 #endif
       }
