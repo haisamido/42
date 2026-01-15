@@ -152,6 +152,16 @@ Windows falls back to sequential initialization because pthreads are not nativel
 4. **Responsive I/O**: Only processes sockets that have data ready
 5. **Backward Compatible**: Windows falls back to original behavior; GMSEC connections unchanged
 
+## Mode=OFF Handling
+
+IPC entries with `Mode = OFF` in `Inp_IPC.txt` are gracefully skipped during initialization. The system:
+
+1. Detects the OFF mode during thread initialization
+2. Marks the entry as "connected" internally (so it doesn't block other connections)
+3. Prints an informative message showing which entry was skipped with its configured host and port
+
+This allows configurations to define placeholder IPC entries that can be enabled later without blocking the simulation startup.
+
 ## Usage
 
 No changes required to `Inp_IPC.txt` configuration. The new behavior is automatic on Unix/Mac platforms.
@@ -166,6 +176,17 @@ Waiting for all connections to establish...
 IPC[0] server connection established on port 10001
 IPC[1] client connection established to localhost:10002
 IPC[2] server connection established on port 10003
+All IPC connections established.
+```
+
+When IPC entries have `Mode = OFF`, the output will show:
+
+```text
+IPC[0] Mode is OFF, skipping (localhost:10001)
+IPC[1] Mode is OFF, skipping (localhost:10002)
+IPC[2] Mode is OFF, skipping (localhost:10003)
+IPC[3] Mode is OFF, skipping (localhost:10004)
+Waiting for all connections to establish...
 All IPC connections established.
 ```
 
