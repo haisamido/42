@@ -16,6 +16,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef _WIN32
+#include <pthread.h>
+#include <sys/select.h>
+#endif
+
+#include "iokit.h"  /* For CONN_STATUS_* constants and non-blocking socket functions */
+
 #ifdef _ENABLE_GMSEC_
    #include "gmseckit.h"
    GMSEC_Config cfg;
@@ -36,169 +43,347 @@ void WriteToSocket(SOCKET Socket,  char **Prefix, long Nprefix, long EchoEnabled
 void ReadFromFile(FILE *StateFile, long EchoEnabled);
 void ReadFromSocket(SOCKET Socket, long EchoEnabled);
 
+/**********************************************************************/
+/* Thread argument structure for parallel socket initialization       */
+/**********************************************************************/
+struct IpcInitArg {
+   struct IpcType *I;
+   long Iipc;
+   char FileName[80];
+};
+
+#ifndef _WIN32
+/**********************************************************************/
+/* Thread function for initializing a single IPC connection           */
+/**********************************************************************/
+void *InitSingleIPC(void *arg)
+{
+      struct IpcInitArg *A = (struct IpcInitArg *)arg;
+      struct IpcType *I = A->I;
+      long Iipc = A->Iipc;
+
+      if (I->Mode == IPC_TX || I->Mode == IPC_RX || I->Mode == IPC_TXRX) {
+         if (I->SocketRole == IPC_SERVER) {
+            /* Non-blocking server setup - creates listening socket */
+            int ListenSock;
+            if (InitSocketServerNonBlocking(I->Port, &ListenSock) == 0) {
+               I->ListenSocket = ListenSock;
+               I->ConnStatus = CONN_STATUS_PENDING;
+            } else {
+               I->ConnStatus = CONN_STATUS_FAILED;
+            }
+         }
+         else if (I->SocketRole == IPC_CLIENT) {
+            /* Non-blocking client setup - initiates connection */
+            I->Socket = InitSocketClientNonBlocking(I->HostName, I->Port);
+            if (I->Socket >= 0) {
+               I->ConnStatus = CONN_STATUS_PENDING;
+            } else {
+               I->ConnStatus = CONN_STATUS_FAILED;
+            }
+         }
+         #ifdef _ENABLE_GMSEC_
+         else if (I->SocketRole == IPC_GMSEC_CLIENT) {
+            /* GMSEC connections remain synchronous */
+            status = statusCreate();
+            cfg = configCreate();
+            ConnMgr = ConnectToMBServer(I->HostName, I->Port, status, cfg);
+            if (I->Mode == IPC_TX)
+               connectionManagerSubscribe(ConnMgr, "GMSEC.42.RX.>", status);
+            else if (I->Mode == IPC_RX)
+               connectionManagerSubscribe(ConnMgr, "GMSEC.42.TX.>", status);
+            else
+               connectionManagerSubscribe(ConnMgr, "GMSEC.42.TXRX.>", status);
+            CheckGmsecStatus(status);
+            I->ConnStatus = CONN_STATUS_CONNECTED;
+         }
+         #endif
+         else {
+            printf("Unknown SocketRole %ld for IPC[%ld]\n", I->SocketRole, Iipc);
+            I->ConnStatus = CONN_STATUS_FAILED;
+         }
+      }
+      else if (I->Mode == IPC_WRITEFILE) {
+         I->File = FileOpen(InOutPath, A->FileName, "wt");
+         I->ConnStatus = CONN_STATUS_CONNECTED;
+      }
+      else if (I->Mode == IPC_READFILE) {
+         I->File = FileOpen(InOutPath, A->FileName, "rt");
+         I->ConnStatus = CONN_STATUS_CONNECTED;
+      }
+      else if (I->Mode == IPC_FFTB) {
+         I->SocketRole = IPC_CLIENT;
+         I->Socket = InitSocketClientNonBlocking(I->HostName, I->Port);
+         if (I->Socket >= 0) {
+            I->ConnStatus = CONN_STATUS_PENDING;
+         } else {
+            I->ConnStatus = CONN_STATUS_FAILED;
+         }
+      }
+
+      I->Init = 1;
+      return NULL;
+}
+#endif /* !_WIN32 */
+
+/*********************************************************************/
+/* Check and complete pending connections (non-blocking)             */
+/*********************************************************************/
+int CheckPendingConnections(void)
+{
+      struct IpcType *I;
+      long Iipc;
+      int AllConnected = 1;
+      int status;
+
+      for (Iipc = 0; Iipc < Nipc; Iipc++) {
+         I = &IPC[Iipc];
+
+         if (I->ConnStatus == CONN_STATUS_PENDING) {
+            AllConnected = 0;
+
+            if (I->SocketRole == IPC_SERVER) {
+               /* Check for incoming client connection */
+               SOCKET ClientSock;
+               status = AcceptClientNonBlocking(I->ListenSocket, &ClientSock);
+               if (status == CONN_STATUS_CONNECTED) {
+                  I->Socket = ClientSock;
+                  I->ConnStatus = CONN_STATUS_CONNECTED;
+                  printf("IPC[%ld] server connection established on port %ld\n", Iipc, I->Port);
+               } else if (status == CONN_STATUS_FAILED) {
+                  I->ConnStatus = CONN_STATUS_FAILED;
+                  printf("IPC[%ld] server connection failed on port %ld\n", Iipc, I->Port);
+               }
+            }
+            else if (I->SocketRole == IPC_CLIENT) {
+               /* Check if client connect() completed */
+               status = CheckConnectComplete(I->Socket);
+               if (status == CONN_STATUS_CONNECTED) {
+                  I->ConnStatus = CONN_STATUS_CONNECTED;
+                  printf("IPC[%ld] client connection established to %s:%ld\n", Iipc, I->HostName, I->Port);
+               } else if (status == CONN_STATUS_FAILED) {
+                  I->ConnStatus = CONN_STATUS_FAILED;
+                  printf("IPC[%ld] client connection failed to %s:%ld\n", Iipc, I->HostName, I->Port);
+               }
+            }
+         }
+      }
+
+      return AllConnected;
+}
+
 /*********************************************************************/
 void InitInterProcessComm(void)
 {
       FILE *infile;
-      char junk[120],newline,response[120];
+      char junk[120], newline, response[120];
       struct IpcType *I;
-      long Iipc,Ipx;
-      char FileName[80],Prefix[80];
+      long Iipc, Ipx;
+      char FileName[80], Prefix[80];
 
-      infile = FileOpen(InOutPath,"Inp_IPC.txt","rt");
-      fscanf(infile,"%[^\n] %[\n]",junk,&newline);
-      fscanf(infile,"%ld %[^\n] %[\n]",&Nipc,junk,&newline);
-      IPC = (struct IpcType *) calloc(Nipc,sizeof(struct IpcType));
-      for(Iipc=0;Iipc<Nipc;Iipc++) {
+#ifndef _WIN32
+      pthread_t *threads;
+      struct IpcInitArg *Args;
+#endif
+
+      infile = FileOpen(InOutPath, "Inp_IPC.txt", "rt");
+      fscanf(infile, "%[^\n] %[\n]", junk, &newline);
+      fscanf(infile, "%ld %[^\n] %[\n]", &Nipc, junk, &newline);
+      IPC = (struct IpcType *) calloc(Nipc, sizeof(struct IpcType));
+
+#ifndef _WIN32
+      threads = (pthread_t *) calloc(Nipc, sizeof(pthread_t));
+      Args = (struct IpcInitArg *) calloc(Nipc, sizeof(struct IpcInitArg));
+#endif
+
+      /* Phase 1: Parse config and launch threads for socket initialization */
+      for (Iipc = 0; Iipc < Nipc; Iipc++) {
          I = &IPC[Iipc];
-         fscanf(infile,"%[^\n] %[\n]",junk,&newline);
-         fscanf(infile,"%s %[^\n] %[\n]",response,junk,&newline);
+         fscanf(infile, "%[^\n] %[\n]", junk, &newline);
+         fscanf(infile, "%s %[^\n] %[\n]", response, junk, &newline);
          I->Mode = DecodeString(response);
-         fscanf(infile,"\"%[^\"]\" %[^\n] %[\n]",FileName,junk,&newline);
-         fscanf(infile,"%s %[^\n] %[\n]",response,junk,&newline);
+         fscanf(infile, "\"%[^\"]\" %[^\n] %[\n]", FileName, junk, &newline);
+         fscanf(infile, "%s %[^\n] %[\n]", response, junk, &newline);
          I->SocketRole = DecodeString(response);
-         fscanf(infile,"%s %ld %[^\n] %[\n]",I->HostName,&I->Port,junk,&newline);
-         fscanf(infile,"%s %[^\n] %[\n]",response,junk,&newline);
+         fscanf(infile, "%s %ld %[^\n] %[\n]", I->HostName, &I->Port, junk, &newline);
+         fscanf(infile, "%s %[^\n] %[\n]", response, junk, &newline);
          I->AllowBlocking = DecodeString(response);
-         fscanf(infile,"%s %[^\n] %[\n]",response,junk,&newline);
+         fscanf(infile, "%s %[^\n] %[\n]", response, junk, &newline);
          I->EchoEnabled = DecodeString(response);
-         fscanf(infile,"%ld %[^\n] %[\n]",&I->Nprefix,junk,&newline);
-         I->Prefix = (char **) calloc(I->Nprefix,sizeof(char *));
-         for(Ipx=0;Ipx<I->Nprefix;Ipx++) {
-            fscanf(infile,"\"%[^\"]\" %[^\n] %[\n]",Prefix,junk,&newline);
-            I->Prefix[Ipx] = (char *) calloc(strlen(Prefix)+1,sizeof(char));
-            strcpy(I->Prefix[Ipx],Prefix);
+         fscanf(infile, "%ld %[^\n] %[\n]", &I->Nprefix, junk, &newline);
+         I->Prefix = (char **) calloc(I->Nprefix, sizeof(char *));
+         for (Ipx = 0; Ipx < I->Nprefix; Ipx++) {
+            fscanf(infile, "\"%[^\"]\" %[^\n] %[\n]", Prefix, junk, &newline);
+            I->Prefix[Ipx] = (char *) calloc(strlen(Prefix)+1, sizeof(char));
+            strcpy(I->Prefix[Ipx], Prefix);
          }
-         
+
+         I->ConnStatus = CONN_STATUS_PENDING;
+         I->ListenSocket = -1;
+         I->Socket = -1;
+
+#ifndef _WIN32
+         /* Set up thread argument and launch thread */
+         Args[Iipc].I = I;
+         Args[Iipc].Iipc = Iipc;
+         strcpy(Args[Iipc].FileName, FileName);
+         pthread_create(&threads[Iipc], NULL, InitSingleIPC, &Args[Iipc]);
+#else
+         /* Windows: fall back to sequential initialization */
          I->Init = 1;
-
-         if (I->Mode == IPC_TX) {
+         if (I->Mode == IPC_TX || I->Mode == IPC_RX || I->Mode == IPC_TXRX) {
             if (I->SocketRole == IPC_SERVER) {
-               I->Socket = InitSocketServer(I->Port,I->AllowBlocking);
+               I->Socket = InitSocketServer(I->Port, I->AllowBlocking);
+               I->ConnStatus = CONN_STATUS_CONNECTED;
             }
             else if (I->SocketRole == IPC_CLIENT) {
-               I->Socket = InitSocketClient(I->HostName,I->Port,I->AllowBlocking);
+               I->Socket = InitSocketClient(I->HostName, I->Port, I->AllowBlocking);
+               I->ConnStatus = CONN_STATUS_CONNECTED;
             }
-            #ifdef _ENABLE_GMSEC_
-            else if (I->SocketRole == IPC_GMSEC_CLIENT) {
-               status = statusCreate();
-               cfg = configCreate();
-               ConnMgr = ConnectToMBServer(I->HostName,I->Port,status,cfg);
-               connectionManagerSubscribe(ConnMgr,"GMSEC.42.RX.>",status);
-               CheckGmsecStatus(status);
-            }
-            #endif
-            else {
-               printf("Oops.  Unknown SocketRole %ld for IPC[%ld] in InitInterProcessComm.  Bailing out.\n",I->SocketRole,Iipc);
-               exit(1);
-            }
-         }
-         else if (I->Mode == IPC_RX) {
-            if (I->SocketRole == IPC_SERVER) {
-               I->Socket = InitSocketServer(I->Port,I->AllowBlocking);
-            }
-            else if (I->SocketRole == IPC_CLIENT) {
-               I->Socket = InitSocketClient(I->HostName,I->Port,I->AllowBlocking);
-            }
-            #ifdef _ENABLE_GMSEC_
-            else if (I->SocketRole == IPC_GMSEC_CLIENT) {
-               status = statusCreate();
-               cfg = configCreate();
-               ConnMgr = ConnectToMBServer(I->HostName,I->Port,status,cfg);
-               connectionManagerSubscribe(ConnMgr,"GMSEC.42.TX.>",status);
-               CheckGmsecStatus(status);
-            }
-            #endif
-            else {
-               printf("Oops.  Unknown SocketRole %ld for IPC[%ld] in InitInterProcessComm.  Bailing out.\n",I->SocketRole,Iipc);
-               exit(1);
-            }
-
-         }
-         else if (I->Mode == IPC_TXRX) {
-            if (I->SocketRole == IPC_SERVER) {
-               I->Socket = InitSocketServer(I->Port,I->AllowBlocking);
-            }
-            else if (I->SocketRole == IPC_CLIENT) {
-               I->Socket = InitSocketClient(I->HostName,I->Port,I->AllowBlocking);
-            }
-            #ifdef _ENABLE_GMSEC_
-            else if (I->SocketRole == IPC_GMSEC_CLIENT) {
-               status = statusCreate();
-               cfg = configCreate();
-               ConnMgr = ConnectToMBServer(I->HostName,I->Port,status,cfg);
-               connectionManagerSubscribe(ConnMgr,"GMSEC.42.TXRX.>",status);
-               CheckGmsecStatus(status);
-            }
-            #endif
-            else {
-               printf("Oops.  Unknown SocketRole %ld for IPC[%ld] in InitInterProcessComm.  Bailing out.\n",I->SocketRole,Iipc);
-               exit(1);
-            }
-
          }
          else if (I->Mode == IPC_WRITEFILE) {
-            I->File = FileOpen(InOutPath,FileName,"wt");
+            I->File = FileOpen(InOutPath, FileName, "wt");
+            I->ConnStatus = CONN_STATUS_CONNECTED;
          }
          else if (I->Mode == IPC_READFILE) {
-            I->File = FileOpen(InOutPath,FileName,"rt");
+            I->File = FileOpen(InOutPath, FileName, "rt");
+            I->ConnStatus = CONN_STATUS_CONNECTED;
          }
          else if (I->Mode == IPC_FFTB) {
-            I->SocketRole = IPC_CLIENT; /* Spirent is Host */
-            I->Socket = InitSocketClient(I->HostName,I->Port,I->AllowBlocking);
+            I->SocketRole = IPC_CLIENT;
+            I->Socket = InitSocketClient(I->HostName, I->Port, I->AllowBlocking);
+            I->ConnStatus = CONN_STATUS_CONNECTED;
          }
+#endif
       }
       fclose(infile);
+
+#ifndef _WIN32
+      /* Phase 2: Wait for all threads to complete initial setup */
+      for (Iipc = 0; Iipc < Nipc; Iipc++) {
+         pthread_join(threads[Iipc], NULL);
+      }
+      free(threads);
+      free(Args);
+
+      /* Phase 3: Poll for pending connections to complete */
+      printf("Waiting for all connections to establish...\n");
+      while (!CheckPendingConnections()) {
+         usleep(10000); /* 10ms polling interval */
+      }
+      printf("All IPC connections established.\n");
+#endif
 }
+/*********************************************************************/
+/* Use select() for non-blocking, order-insensitive I/O               */
 /*********************************************************************/
 void InterProcessComm(void)
 {
       struct IpcType *I;
       long Iipc;
-      
-      for(Iipc=0;Iipc<Nipc;Iipc++) {
+      fd_set readfds, writefds;
+      int maxfd = -1;
+      struct timeval tv;
+      int result;
+
+      /* Skip if no IPC connections */
+      if (Nipc == 0) return;
+
+      FD_ZERO(&readfds);
+      FD_ZERO(&writefds);
+
+      /* Phase 1: Build fd_sets for all sockets that need I/O */
+      for (Iipc = 0; Iipc < Nipc; Iipc++) {
          I = &IPC[Iipc];
+
+         /* Skip if not connected or not a socket mode */
+         if (I->ConnStatus != CONN_STATUS_CONNECTED) continue;
+         if (I->SocketRole == IPC_GMSEC_CLIENT) continue;
+         if (I->Mode == IPC_WRITEFILE || I->Mode == IPC_READFILE) continue;
+
+         if (I->Mode == IPC_TX || I->Mode == IPC_TXRX) {
+            FD_SET(I->Socket, &writefds);
+            if (I->Socket > maxfd) maxfd = I->Socket;
+         }
+         if (I->Mode == IPC_RX || I->Mode == IPC_TXRX) {
+            FD_SET(I->Socket, &readfds);
+            if (I->Socket > maxfd) maxfd = I->Socket;
+         }
+         if (I->Mode == IPC_FFTB) {
+            FD_SET(I->Socket, &writefds);
+            if (I->Socket > maxfd) maxfd = I->Socket;
+         }
+      }
+
+      /* Non-blocking check: timeout = 0 */
+      tv.tv_sec = 0;
+      tv.tv_usec = 0;
+
+      if (maxfd >= 0) {
+         result = select(maxfd + 1, &readfds, &writefds, NULL, &tv);
+         if (result < 0) {
+            printf("Error in select(): %s\n", strerror(errno));
+            return;
+         }
+      }
+
+      /* Phase 2: Process ready sockets (order-insensitive) */
+      for (Iipc = 0; Iipc < Nipc; Iipc++) {
+         I = &IPC[Iipc];
+
+         if (I->ConnStatus != CONN_STATUS_CONNECTED) continue;
+
          if (I->Mode == IPC_TX) {
             if (I->SocketRole != IPC_GMSEC_CLIENT) {
-               WriteToSocket(I->Socket,I->Prefix,I->Nprefix,I->EchoEnabled);
+               if (FD_ISSET(I->Socket, &writefds)) {
+                  WriteToSocket(I->Socket, I->Prefix, I->Nprefix, I->EchoEnabled);
+               }
             }
             #ifdef _ENABLE_GMSEC_
             else {
-               WriteToGmsec(ConnMgr,status,I->Prefix,I->Nprefix,I->EchoEnabled);
+               WriteToGmsec(ConnMgr, status, I->Prefix, I->Nprefix, I->EchoEnabled);
             }
             #endif
          }
          else if (I->Mode == IPC_RX) {
             if (I->SocketRole != IPC_GMSEC_CLIENT) {
-               ReadFromSocket(I->Socket,I->EchoEnabled);
+               if (FD_ISSET(I->Socket, &readfds)) {
+                  ReadFromSocket(I->Socket, I->EchoEnabled);
+               }
             }
             #ifdef _ENABLE_GMSEC_
             else {
-               ReadFromGmsec(ConnMgr,status,I->EchoEnabled);
+               ReadFromGmsec(ConnMgr, status, I->EchoEnabled);
             }
             #endif
          }
          else if (I->Mode == IPC_TXRX) {
             if (I->SocketRole != IPC_GMSEC_CLIENT) {
-               WriteToSocket(I->Socket,I->Prefix,I->Nprefix,I->EchoEnabled);
-               ReadFromSocket(I->Socket,I->EchoEnabled);
+               if (FD_ISSET(I->Socket, &writefds)) {
+                  WriteToSocket(I->Socket, I->Prefix, I->Nprefix, I->EchoEnabled);
+               }
+               if (FD_ISSET(I->Socket, &readfds)) {
+                  ReadFromSocket(I->Socket, I->EchoEnabled);
+               }
             }
             #ifdef _ENABLE_GMSEC_
             else {
-               WriteToGmsec(ConnMgr,status,I->Prefix,I->Nprefix,I->EchoEnabled);
-               ReadFromGmsec(ConnMgr,status,I->EchoEnabled);
+               WriteToGmsec(ConnMgr, status, I->Prefix, I->Nprefix, I->EchoEnabled);
+               ReadFromGmsec(ConnMgr, status, I->EchoEnabled);
             }
             #endif
          }
          else if (I->Mode == IPC_WRITEFILE) {
-            //WriteToFile(I->File,I->Prefix,I->Nprefix,I->EchoEnabled);
+            //WriteToFile(I->File, I->Prefix, I->Nprefix, I->EchoEnabled);
          }
          else if (I->Mode == IPC_READFILE) {
-            //ReadFromFile(I->File,I->EchoEnabled);
+            //ReadFromFile(I->File, I->EchoEnabled);
          }
          #ifdef _ENABLE_FFTB_CODE_
          else if (I->Mode == IPC_FFTB) {
-            SendStatesToSpirent();
+            if (FD_ISSET(I->Socket, &writefds)) {
+               SendStatesToSpirent();
+            }
          }
          #endif
       }

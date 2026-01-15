@@ -31,11 +31,15 @@
 #include <fcntl.h>
 #ifdef _WIN32
    #include <winsock2.h>
+   #include <ws2tcpip.h>
+   #include <windows.h>
 #else
    #include <sys/socket.h>
+   #include <sys/select.h>
    #include <netinet/in.h>
    #include <netinet/tcp.h>
    #include <netdb.h>
+   #include <pthread.h>
    /* Finesse winsock SOCKET datatype */
    #define SOCKET int
 #endif
@@ -50,6 +54,23 @@ double *PpmToPsf(const char *path, const char *filename,
 
 SOCKET InitSocketServer(int Port, int AllowBlocking);
 SOCKET InitSocketClient(const char *hostname, int Port, int AllowBlocking);
+
+/* Non-blocking socket initialization for hybrid approach */
+/* Connection status codes */
+#define CONN_STATUS_PENDING    0
+#define CONN_STATUS_CONNECTED  1
+#define CONN_STATUS_FAILED    -1
+
+/* Non-blocking server: creates listening socket, returns immediately */
+SOCKET InitSocketServerNonBlocking(int Port, int *ListenSocket);
+/* Check if a client has connected to server (non-blocking accept) */
+int AcceptClientNonBlocking(SOCKET ListenSocket, SOCKET *ClientSocket);
+/* Non-blocking client: initiates connection, returns immediately */
+SOCKET InitSocketClientNonBlocking(const char *hostname, int Port);
+/* Check if client connection completed */
+int CheckConnectComplete(SOCKET sockfd);
+/* Set socket to non-blocking mode */
+void SetSocketNonBlocking(SOCKET sockfd);
 
 /*
 ** #ifdef __cplusplus

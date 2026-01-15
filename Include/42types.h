@@ -701,6 +701,8 @@ struct IpcType {
    long AllowBlocking;
    long EchoEnabled;
    SOCKET Socket;
+   SOCKET ListenSocket;    /* For non-blocking server: listening socket */
+   long ConnStatus;        /* Connection status: PENDING, CONNECTED, FAILED */
    FILE *File;
    long Nprefix;
    char **Prefix;

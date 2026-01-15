@@ -315,6 +315,257 @@ SOCKET InitSocketClient(const char *hostname, int Port,int AllowBlocking)
 #endif /* _WIN32 */
 }
 
+/**********************************************************************/
+/* Non-blocking socket functions for hybrid threading/select approach */
+/**********************************************************************/
+void SetSocketNonBlocking(SOCKET sockfd)
+{
+#if defined(_WIN32)
+      u_long Blocking = 1;
+      ioctlsocket(sockfd, FIONBIO, &Blocking);
+#else
+      int flags = fcntl(sockfd, F_GETFL, 0);
+      fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+/**********************************************************************/
+SOCKET InitSocketServerNonBlocking(int Port, int *ListenSocket)
+{
+#if defined(_WIN32)
+      WSADATA wsa;
+      SOCKET init_sockfd;
+      struct sockaddr_in Server;
+      int opt = 1;
+
+      if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
+         printf("Error initializing winsock.\n");
+         return -1;
+      }
+
+      init_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      if (init_sockfd < 0) {
+         printf("Error opening server socket.\n");
+         return -1;
+      }
+
+      setsockopt(init_sockfd, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
+
+      memset((char *) &Server, 0, sizeof(Server));
+      Server.sin_family = AF_INET;
+      Server.sin_addr.s_addr = INADDR_ANY;
+      Server.sin_port = htons(Port);
+
+      if (bind(init_sockfd, (struct sockaddr *) &Server, sizeof(Server)) < 0) {
+         printf("Error on binding server socket on port %d.\n", Port);
+         closesocket(init_sockfd);
+         return -1;
+      }
+
+      listen(init_sockfd, 5);
+      SetSocketNonBlocking(init_sockfd);
+      printf("Server listening (non-blocking) on port %d\n", Port);
+
+      *ListenSocket = init_sockfd;
+      return 0; /* Return 0 to indicate setup success, socket not yet connected */
+#else
+      SOCKET init_sockfd;
+      struct sockaddr_in Server;
+      int opt = 1;
+
+      init_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      if (init_sockfd < 0) {
+         printf("Error opening server socket.\n");
+         return -1;
+      }
+
+      if (setsockopt(init_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
+         printf("Error setting socket option.\n");
+         close(init_sockfd);
+         return -1;
+      }
+
+      memset((char *) &Server, 0, sizeof(Server));
+      Server.sin_family = AF_INET;
+      Server.sin_addr.s_addr = INADDR_ANY;
+      Server.sin_port = htons(Port);
+
+      if (bind(init_sockfd, (struct sockaddr *) &Server, sizeof(Server)) < 0) {
+         printf("Error on binding server socket on port %d.\n", Port);
+         close(init_sockfd);
+         return -1;
+      }
+
+      listen(init_sockfd, 5);
+      SetSocketNonBlocking(init_sockfd);
+      printf("Server listening (non-blocking) on port %d\n", Port);
+
+      *ListenSocket = init_sockfd;
+      return 0;
+#endif
+}
+/**********************************************************************/
+int AcceptClientNonBlocking(SOCKET ListenSocket, SOCKET *ClientSocket)
+{
+      struct sockaddr_in Client;
+      socklen_t clilen = sizeof(Client);
+      SOCKET newsock;
+      int DisableNagle = 1;
+
+      newsock = accept(ListenSocket, (struct sockaddr *) &Client, &clilen);
+
+      if (newsock < 0) {
+#if defined(_WIN32)
+         int err = WSAGetLastError();
+         if (err == WSAEWOULDBLOCK) {
+            return CONN_STATUS_PENDING; /* No client yet */
+         }
+#else
+         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return CONN_STATUS_PENDING; /* No client yet */
+         }
+#endif
+         printf("Error on accepting client socket.\n");
+         return CONN_STATUS_FAILED;
+      }
+
+      /* Client connected */
+      printf("Server accepted client connection.\n");
+
+#if defined(_WIN32)
+      closesocket(ListenSocket);
+#else
+      close(ListenSocket);
+      setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &DisableNagle, sizeof(DisableNagle));
+#endif
+
+      SetSocketNonBlocking(newsock);
+      *ClientSocket = newsock;
+      return CONN_STATUS_CONNECTED;
+}
+/**********************************************************************/
+SOCKET InitSocketClientNonBlocking(const char *hostname, int Port)
+{
+#if defined(_WIN32)
+      WSADATA wsa;
+      SOCKET sockfd;
+      struct sockaddr_in Server;
+      struct hostent *Host;
+
+      if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) {
+         printf("Error initializing winsock.\n");
+         return -1;
+      }
+
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      if (sockfd < 0) {
+         printf("Error opening client socket.\n");
+         return -1;
+      }
+
+      Host = gethostbyname(hostname);
+      if (Host == NULL) {
+         printf("Server %s not found.\n", hostname);
+         closesocket(sockfd);
+         return -1;
+      }
+
+      memset((char *) &Server, 0, sizeof(Server));
+      Server.sin_family = AF_INET;
+      memcpy((char *)&Server.sin_addr.s_addr, (char *)Host->h_addr_list[0], Host->h_length);
+      Server.sin_port = htons(Port);
+
+      SetSocketNonBlocking(sockfd);
+      printf("Client initiating connection to %s:%d (non-blocking)\n", hostname, Port);
+
+      connect(sockfd, (struct sockaddr *) &Server, sizeof(Server));
+      /* connect() will return immediately with WSAEWOULDBLOCK, that's expected */
+
+      return sockfd;
+#else
+      SOCKET sockfd;
+      struct sockaddr_in Server;
+      struct hostent *Host;
+      int result;
+
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      if (sockfd < 0) {
+         printf("Error opening client socket.\n");
+         return -1;
+      }
+
+      Host = gethostbyname(hostname);
+      if (Host == NULL) {
+         printf("Server %s not found.\n", hostname);
+         close(sockfd);
+         return -1;
+      }
+
+      memset((char *) &Server, 0, sizeof(Server));
+      Server.sin_family = AF_INET;
+      memcpy((char *)&Server.sin_addr.s_addr, (char *)Host->h_addr_list[0], Host->h_length);
+      Server.sin_port = htons(Port);
+
+      SetSocketNonBlocking(sockfd);
+      printf("Client initiating connection to %s:%d (non-blocking)\n", hostname, Port);
+
+      result = connect(sockfd, (struct sockaddr *) &Server, sizeof(Server));
+      /* connect() will return -1 with errno EINPROGRESS, that's expected */
+      if (result < 0 && errno != EINPROGRESS) {
+         printf("Error connecting client socket: %s.\n", strerror(errno));
+         close(sockfd);
+         return -1;
+      }
+
+      return sockfd;
+#endif
+}
+/**********************************************************************/
+int CheckConnectComplete(SOCKET sockfd)
+{
+      fd_set writefds;
+      struct timeval tv;
+      int result, err;
+      socklen_t len = sizeof(err);
+
+      FD_ZERO(&writefds);
+      FD_SET(sockfd, &writefds);
+      tv.tv_sec = 0;
+      tv.tv_usec = 0;
+
+      result = select(sockfd + 1, NULL, &writefds, NULL, &tv);
+
+      if (result < 0) {
+         printf("Error in select(): %s\n", strerror(errno));
+         return CONN_STATUS_FAILED;
+      }
+
+      if (result == 0) {
+         return CONN_STATUS_PENDING; /* Not ready yet */
+      }
+
+      /* Socket is writable, check if connection succeeded */
+      if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&err, &len) < 0) {
+         printf("Error in getsockopt(): %s\n", strerror(errno));
+         return CONN_STATUS_FAILED;
+      }
+
+      if (err != 0) {
+         printf("Connection failed: %s\n", strerror(err));
+         return CONN_STATUS_FAILED;
+      }
+
+      printf("Client connection established.\n");
+
+#if !defined(_WIN32)
+      {
+         int DisableNagle = 1;
+         setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &DisableNagle, sizeof(DisableNagle));
+      }
+#endif
+
+      return CONN_STATUS_CONNECTED;
+}
+
 /* #ifdef __cplusplus
 ** }
 ** #endif
