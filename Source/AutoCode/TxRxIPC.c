@@ -4,6 +4,10 @@
 #undef EXTERN
 
 /******************************************************************************/
+/* Buffer size must accommodate all SC, World, and Orb data.
+ * With 65 worlds, 12 SC, and multiple orbits, messages can exceed 100KB. */
+#define IPC_MSG_BUFSIZE 262144
+
 void WriteToSocket(SOCKET Socket,  char **Prefix, long Nprefix, long EchoEnabled)
 {
       struct SCType *S;
@@ -12,7 +16,7 @@ void WriteToSocket(SOCKET Socket,  char **Prefix, long Nprefix, long EchoEnabled
       int Success;
       char Ack[4] = "Ack\0";
       long Is,Ipfx;
-      char Msg[16384];
+      char Msg[IPC_MSG_BUFSIZE];
       long MsgLen = 0;
       long LineLen,PfxLen;
       char line[512];

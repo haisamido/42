@@ -63,14 +63,20 @@ void *InitSingleIPC(void *arg)
       long Iipc = A->Iipc;
 
       if (I->Mode == IPC_TX || I->Mode == IPC_RX || I->Mode == IPC_TXRX) {
+         const char *ModeStr = (I->Mode == IPC_TX) ? "TX" :
+                               (I->Mode == IPC_RX) ? "RX" : "TXRX";
          if (I->SocketRole == IPC_SERVER) {
             /* Non-blocking server setup - creates listening socket */
             int ListenSock;
             if (InitSocketServerNonBlocking(I->Port, &ListenSock) == 0) {
                I->ListenSocket = ListenSock;
                I->ConnStatus = CONN_STATUS_PENDING;
+               printf("IPC[%ld] Mode is %s, server waiting for client (%s:%ld)\n",
+                      Iipc, ModeStr, I->HostName, I->Port);
             } else {
                I->ConnStatus = CONN_STATUS_FAILED;
+               printf("IPC[%ld] Mode is %s, server setup FAILED (%s:%ld)\n",
+                      Iipc, ModeStr, I->HostName, I->Port);
             }
          }
          else if (I->SocketRole == IPC_CLIENT) {
@@ -78,8 +84,12 @@ void *InitSingleIPC(void *arg)
             I->Socket = InitSocketClientNonBlocking(I->HostName, I->Port);
             if (I->Socket >= 0) {
                I->ConnStatus = CONN_STATUS_PENDING;
+               printf("IPC[%ld] Mode is %s, client connecting to server (%s:%ld)\n",
+                      Iipc, ModeStr, I->HostName, I->Port);
             } else {
                I->ConnStatus = CONN_STATUS_FAILED;
+               printf("IPC[%ld] Mode is %s, client connection FAILED (%s:%ld)\n",
+                      Iipc, ModeStr, I->HostName, I->Port);
             }
          }
          #ifdef _ENABLE_GMSEC_
@@ -106,18 +116,24 @@ void *InitSingleIPC(void *arg)
       else if (I->Mode == IPC_WRITEFILE) {
          I->File = FileOpen(InOutPath, A->FileName, "wt");
          I->ConnStatus = CONN_STATUS_CONNECTED;
+         printf("IPC[%ld] Mode is WRITEFILE, opened %s for writing\n", Iipc, A->FileName);
       }
       else if (I->Mode == IPC_READFILE) {
          I->File = FileOpen(InOutPath, A->FileName, "rt");
          I->ConnStatus = CONN_STATUS_CONNECTED;
+         printf("IPC[%ld] Mode is READFILE, opened %s for reading\n", Iipc, A->FileName);
       }
       else if (I->Mode == IPC_FFTB) {
          I->SocketRole = IPC_CLIENT;
          I->Socket = InitSocketClientNonBlocking(I->HostName, I->Port);
          if (I->Socket >= 0) {
             I->ConnStatus = CONN_STATUS_PENDING;
+            printf("IPC[%ld] Mode is FFTB, client connecting to server (%s:%ld)\n",
+                   Iipc, I->HostName, I->Port);
          } else {
             I->ConnStatus = CONN_STATUS_FAILED;
+            printf("IPC[%ld] Mode is FFTB, client connection FAILED (%s:%ld)\n",
+                   Iipc, I->HostName, I->Port);
          }
       }
       else {
@@ -310,6 +326,8 @@ void InterProcessComm(void)
          if (I->ConnStatus != CONN_STATUS_CONNECTED) continue;
          if (I->SocketRole == IPC_GMSEC_CLIENT) continue;
          if (I->Mode == IPC_WRITEFILE || I->Mode == IPC_READFILE) continue;
+         if (I->Mode == IPC_OFF) continue;  /* Skip OFF entries */
+         if (I->Socket < 0) continue;  /* Skip invalid sockets */
 
          if (I->Mode == IPC_TX || I->Mode == IPC_TXRX) {
             FD_SET(I->Socket, &writefds);
@@ -342,6 +360,8 @@ void InterProcessComm(void)
          I = &IPC[Iipc];
 
          if (I->ConnStatus != CONN_STATUS_CONNECTED) continue;
+         if (I->Mode == IPC_OFF) continue;  /* Skip OFF entries */
+         if (I->Socket < 0) continue;  /* Skip invalid sockets */
 
          if (I->Mode == IPC_TX) {
             if (I->SocketRole != IPC_GMSEC_CLIENT) {

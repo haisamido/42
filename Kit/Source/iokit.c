@@ -438,7 +438,9 @@ int AcceptClientNonBlocking(SOCKET ListenSocket, SOCKET *ClientSocket)
       setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &DisableNagle, sizeof(DisableNagle));
 #endif
 
-      SetSocketNonBlocking(newsock);
+      /* Note: Do NOT set newsock to non-blocking here.
+       * WriteToSocket/ReadFromSocket expect blocking I/O for Ack handling.
+       * Only the listening socket needs to be non-blocking for accept(). */
       *ClientSocket = newsock;
       return CONN_STATUS_CONNECTED;
 }
@@ -556,7 +558,18 @@ int CheckConnectComplete(SOCKET sockfd)
 
       printf("Client connection established.\n");
 
-#if !defined(_WIN32)
+      /* Set socket back to blocking mode for I/O.
+       * WriteToSocket/ReadFromSocket expect blocking I/O for Ack handling. */
+#if defined(_WIN32)
+      {
+         u_long Blocking = 0;
+         ioctlsocket(sockfd, FIONBIO, &Blocking);
+      }
+#else
+      {
+         int flags = fcntl(sockfd, F_GETFL, 0);
+         fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+      }
       {
          int DisableNagle = 1;
          setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &DisableNagle, sizeof(DisableNagle));

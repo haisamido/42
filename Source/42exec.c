@@ -16,6 +16,10 @@
 #include "42.h"
 #undef DECLARE_GLOBALS
 
+#ifndef _WIN32
+#include <signal.h>
+#endif
+
 /* #ifdef __cplusplus
 ** namespace _42 {
 ** using namespace Kit;
@@ -395,6 +399,13 @@ long SimStep(void)
 int exec(int argc,char **argv)
 {
       long Done = 0;
+
+      /* Ignore SIGPIPE to prevent crash when writing to closed sockets.
+       * This allows socket write() to return -1 with errno=EPIPE instead
+       * of terminating the process. Required for robust IPC handling. */
+      #ifndef _WIN32
+      signal(SIGPIPE, SIG_IGN);
+      #endif
 
       MapTime = 0.0;
       JointTime = 0.0;

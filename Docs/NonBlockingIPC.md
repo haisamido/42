@@ -190,6 +190,109 @@ Waiting for all connections to establish...
 All IPC connections established.
 ```
 
+## Bug Fixes
+
+### Buffer Overflow Fix (TxRxIPC.c)
+
+The original `WriteToSocket()` function used a 16KB message buffer which was insufficient when transmitting data with multiple prefixes (SC, Orb, World). With 65 worlds, 12 spacecraft, and multiple orbits, messages can exceed 30KB, causing a buffer overflow and SIGBUS crash.
+
+**Fix**: Increased `IPC_MSG_BUFSIZE` from 16384 to 262144 (256KB) in `Source/AutoCode/TxRxIPC.c`.
+
+### SIGPIPE Handling (42exec.c)
+
+Added `signal(SIGPIPE, SIG_IGN)` in `exec()` to prevent crashes when writing to closed sockets. This allows socket operations to fail gracefully with errno=EPIPE instead of terminating the process.
+
+## Test Client
+
+A Python test client is provided in `Demo/ipc_client.py` for testing TX mode IPC connections:
+
+```bash
+# Start 42 simulation first, then run:
+python3 Demo/ipc_client.py
+```
+
+The client connects to localhost:10001, receives telemetry data, and sends the required "Ack" response after each message.
+
+## Message Buffer Size Analysis
+
+### Background
+
+The original `WriteToSocket()` function used a 16KB (16384 bytes) stack-allocated message buffer. This proved insufficient when transmitting telemetry with multiple prefixes (SC, Orb, World). Testing showed messages can reach 33KB+ with 65 worlds, 12 spacecraft, and multiple orbits, causing buffer overflow and SIGBUS crashes.
+
+The buffer was increased to 256KB (262144 bytes) to accommodate large telemetry payloads.
+
+### Pros
+
+| Benefit | Description |
+|---------|-------------|
+| **Crash Prevention** | Eliminated SIGBUS (signal 10) crashes caused by buffer overflow |
+| **Full Telemetry Support** | Supports all prefix combinations (SC, Orb, World) simultaneously |
+| **Headroom** | 256KB provides ~7x margin over observed 33KB messages |
+| **No API Changes** | Fix is internal; no changes to calling code or configuration |
+| **Fast Allocation** | Stack allocation is faster than heap allocation |
+
+### Cons
+
+| Drawback | Description |
+|----------|-------------|
+| **Increased Stack Usage** | Each `WriteToSocket()` call consumes 256KB of stack space |
+| **Memory Overhead** | Most messages use <50KB, leaving >200KB unused |
+| **Platform Variability** | Default stack sizes vary by OS (typically 1-8MB) |
+| **Recursive Risk** | Deep call stacks combined with large buffers may exhaust stack |
+
+### Risks
+
+| Risk | Severity | Likelihood |
+|------|----------|------------|
+| **Stack Overflow** | High | Low-Medium |
+| Systems with limited stack size (embedded, threads with small stacks) may overflow | | |
+| **AutoCode Overwrite** | Medium | Medium |
+| `TxRxIPC.c` is in `Source/AutoCode/` and may be regenerated, reverting the fix | | |
+| **Silent Truncation** | Medium | Low |
+| Messages exceeding 256KB would still overflow (though unlikely with current data) | | |
+| **Thread Stack Exhaustion** | Medium | Low |
+| Threads often have smaller default stacks (512KB-1MB) than main thread | | |
+
+### Mitigations
+
+| Risk | Mitigation Strategy |
+|------|---------------------|
+| **Stack Overflow** | **Option A**: Convert to heap allocation using `malloc()`/`free()` |
+| | **Option B**: Increase thread/process stack size via `ulimit -s` or `pthread_attr_setstacksize()` |
+| | **Option C**: Use static buffer with mutex for thread safety |
+| **AutoCode Overwrite** | Document the change prominently; add post-generation script to patch buffer size; consider moving `WriteToSocket()` to non-generated file |
+| **Silent Truncation** | Add runtime check: `if (MsgLen > IPC_MSG_BUFSIZE) { log_error(); }` |
+| **Thread Stack Exhaustion** | Explicitly set thread stack size to ≥2MB when creating IPC threads |
+
+### Recommended Long-Term Fix
+
+For production systems, consider replacing the stack buffer with heap allocation:
+
+```c
+void WriteToSocket(SOCKET Socket, char **Prefix, long Nprefix, long EchoEnabled)
+{
+    char *Msg = (char *)malloc(IPC_MSG_BUFSIZE);
+    if (Msg == NULL) {
+        fprintf(stderr, "WriteToSocket: Failed to allocate message buffer\n");
+        return;
+    }
+
+    /* ... existing code using Msg ... */
+
+    free(Msg);
+}
+```
+
+This eliminates stack size concerns at the cost of slightly slower allocation.
+
+## Known Risks
+
+1. **Stack Memory**: Buffer increased to 256KB on stack in `WriteToSocket()`. Systems with limited stack size may need heap allocation instead.
+
+2. **AutoCode Directory**: `TxRxIPC.c` is in `Source/AutoCode/` - if this file is auto-generated, the buffer fix may be overwritten on regeneration.
+
+3. **Silent Socket Failures**: With SIGPIPE ignored, socket write failures return -1 instead of crashing. Code should check return values.
+
 ## Limitations
 
 - Windows uses sequential initialization (no pthreads)
