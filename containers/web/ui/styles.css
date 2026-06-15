@@ -1,0 +1,419 @@
+/* 42 Web UI — Layout and Theme */
+
+:root {
+   --bg-primary: #1a1a2e;
+   --bg-secondary: #16213e;
+   --bg-panel: #0f3460;
+   --text-primary: #e0e0e0;
+   --text-secondary: #a0a0a0;
+   --accent: #00ff88;
+   --accent-dim: #00aa55;
+   --error: #ff4444;
+   --border: #2a2a4a;
+   --left-width: 320px;
+   --header-height: 48px;
+   --console-height: 160px;
+}
+
+* {
+   margin: 0;
+   padding: 0;
+   box-sizing: border-box;
+}
+
+body {
+   font-family: 'Courier New', monospace;
+   font-size: 13px;
+   background: var(--bg-primary);
+   color: var(--text-primary);
+   height: 100vh;
+   overflow: hidden;
+   display: flex;
+   flex-direction: column;
+}
+
+/* Header */
+#app-header {
+   height: var(--header-height);
+   background: var(--bg-secondary);
+   border-bottom: 1px solid var(--border);
+   display: flex;
+   align-items: center;
+   padding: 0 16px;
+   flex-shrink: 0;
+}
+
+#app-header h1 {
+   font-size: 18px;
+   font-weight: bold;
+   color: var(--accent);
+}
+
+#app-header .subtitle {
+   font-size: 12px;
+   color: var(--text-secondary);
+   font-weight: normal;
+   margin-left: 8px;
+}
+
+/* App body: left panel + viewer */
+#app-body {
+   flex: 1;
+   display: flex;
+   min-height: 0;
+}
+
+/* Left panel */
+#left-panel {
+   width: var(--left-width);
+   background: var(--bg-secondary);
+   border-right: 1px solid var(--border);
+   overflow-y: auto;
+   flex-shrink: 0;
+}
+
+/* 3D viewer */
+#viewer-container {
+   flex: 1;
+   min-width: 0;
+   position: relative;
+   background: #000;
+}
+
+/* Console panel */
+#console-panel {
+   height: var(--console-height);
+   background: var(--bg-secondary);
+   border-top: 1px solid var(--border);
+   flex-shrink: 0;
+   overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Control Panel                                                       */
+/* ------------------------------------------------------------------ */
+
+.control-panel {
+   padding: 12px;
+   border-bottom: 1px solid var(--border);
+}
+
+.control-buttons {
+   display: flex;
+   gap: 6px;
+   margin-bottom: 10px;
+}
+
+.control-buttons button {
+   flex: 1;
+   padding: 6px 8px;
+   background: var(--bg-panel);
+   color: var(--text-primary);
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   cursor: pointer;
+   font-family: inherit;
+   font-size: 12px;
+}
+
+.control-buttons button:hover:not(:disabled) {
+   background: var(--accent-dim);
+   color: #fff;
+}
+
+.control-buttons button:disabled {
+   opacity: 0.4;
+   cursor: not-allowed;
+}
+
+.control-speed {
+   display: flex;
+   align-items: center;
+   gap: 6px;
+   margin-bottom: 6px;
+   font-size: 11px;
+   color: var(--text-secondary);
+}
+
+.control-speed input[type="range"] {
+   flex: 1;
+   accent-color: var(--accent);
+}
+
+.control-status {
+   font-size: 11px;
+   color: var(--text-secondary);
+}
+
+.control-status span {
+   color: var(--accent);
+   font-weight: bold;
+}
+
+/* ------------------------------------------------------------------ */
+/* State Panel                                                         */
+/* ------------------------------------------------------------------ */
+
+.state-panel {
+   padding: 12px;
+}
+
+.state-panel h3 {
+   font-size: 13px;
+   margin-bottom: 8px;
+   color: var(--accent);
+}
+
+.state-table {
+   width: 100%;
+   border-collapse: collapse;
+   font-size: 11px;
+}
+
+.state-table td {
+   padding: 2px 4px;
+}
+
+.state-table td:first-child {
+   color: var(--text-secondary);
+   width: 60px;
+}
+
+.state-table td:nth-child(2) {
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+   color: var(--text-primary);
+}
+
+.state-table td:nth-child(3) {
+   color: var(--text-secondary);
+   padding-left: 4px;
+   width: 40px;
+}
+
+.state-table .section-header td {
+   padding-top: 8px;
+   color: var(--accent-dim);
+   font-weight: bold;
+   font-size: 10px;
+   text-transform: uppercase;
+   letter-spacing: 0.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Config / Console Panel                                              */
+/* ------------------------------------------------------------------ */
+
+.config-panel {
+   height: 100%;
+   display: flex;
+   flex-direction: column;
+}
+
+.console-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   padding: 4px 12px;
+   border-bottom: 1px solid var(--border);
+   flex-shrink: 0;
+}
+
+.console-header h3 {
+   font-size: 11px;
+   color: var(--text-secondary);
+   text-transform: uppercase;
+   letter-spacing: 0.5px;
+}
+
+.console-header button {
+   background: none;
+   border: 1px solid var(--border);
+   color: var(--text-secondary);
+   font-size: 10px;
+   padding: 2px 8px;
+   border-radius: 3px;
+   cursor: pointer;
+   font-family: inherit;
+}
+
+.console-header button:hover {
+   color: var(--text-primary);
+   border-color: var(--text-secondary);
+}
+
+.console-log {
+   flex: 1;
+   overflow-y: auto;
+   padding: 4px 12px;
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre-wrap;
+   word-wrap: break-word;
+}
+
+.console-stdout {
+   color: var(--text-primary);
+}
+
+.console-stderr {
+   color: var(--error);
+}
+
+/* ------------------------------------------------------------------ */
+/* File Browser Panel                                                  */
+/* ------------------------------------------------------------------ */
+
+.file-browser {
+   border-top: 1px solid var(--border);
+}
+
+.file-browser-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   padding: 8px 12px;
+   border-bottom: 1px solid var(--border);
+}
+
+.file-browser-header h3 {
+   font-size: 13px;
+   color: var(--accent);
+}
+
+.file-browser-header button {
+   background: none;
+   border: 1px solid var(--border);
+   color: var(--text-secondary);
+   font-size: 10px;
+   padding: 2px 8px;
+   border-radius: 3px;
+   cursor: pointer;
+   font-family: inherit;
+}
+
+.file-browser-header button:hover {
+   color: var(--text-primary);
+   border-color: var(--text-secondary);
+}
+
+.file-browser-body {
+   max-height: 300px;
+   overflow-y: auto;
+}
+
+.file-list {
+   list-style: none;
+   padding: 0;
+   margin: 0;
+}
+
+.file-item {
+   padding: 4px 12px;
+   font-size: 11px;
+   cursor: pointer;
+   border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+.file-item:hover {
+   background: var(--bg-panel);
+}
+
+.file-item.selected {
+   background: var(--bg-panel);
+   color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* File Viewer Overlay                                                 */
+/* ------------------------------------------------------------------ */
+
+.file-viewer-overlay {
+   display: none;
+   position: fixed;
+   top: 0;
+   left: 0;
+   right: 0;
+   bottom: 0;
+   background: rgba(0, 0, 0, 0.7);
+   z-index: 1000;
+   align-items: center;
+   justify-content: center;
+}
+
+.file-viewer {
+   background: var(--bg-secondary);
+   border: 1px solid var(--border);
+   border-radius: 6px;
+   width: 80vw;
+   max-width: 900px;
+   max-height: 80vh;
+   display: flex;
+   flex-direction: column;
+}
+
+.file-viewer-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   padding: 8px 16px;
+   border-bottom: 1px solid var(--border);
+   flex-shrink: 0;
+}
+
+.file-viewer-title {
+   font-size: 14px;
+   font-weight: bold;
+   color: var(--accent);
+}
+
+.file-viewer-header button {
+   background: none;
+   border: 1px solid var(--border);
+   color: var(--text-secondary);
+   font-size: 12px;
+   padding: 2px 10px;
+   border-radius: 3px;
+   cursor: pointer;
+   font-family: inherit;
+}
+
+.file-viewer-header button:hover {
+   color: var(--text-primary);
+   border-color: var(--text-secondary);
+}
+
+.file-viewer-content {
+   flex: 1;
+   overflow: auto;
+   padding: 12px 16px;
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre;
+   color: var(--text-primary);
+   tab-size: 8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Scrollbar styling                                                   */
+/* ------------------------------------------------------------------ */
+
+::-webkit-scrollbar {
+   width: 6px;
+}
+
+::-webkit-scrollbar-track {
+   background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+   background: var(--border);
+   border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+   background: var(--text-secondary);
+}

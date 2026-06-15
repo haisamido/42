@@ -1,0 +1,86 @@
+# Containerfile — Multi-stage build for 42 WASM Web UI
+#
+# Stages:
+#   fortytwo-base       — Ubuntu with build tools, 42 cloned from git
+#   fortytwo-build-wasm — Emscripten SDK, compiles 42 to WASM
+#   fortytwo-web        — Minimal Node.js runtime serving built artifacts
+#
+# Usage:
+#   cd containers/web && docker compose build
+#   docker compose up -d
+#   open http://localhost:8042
+
+ARG EMSDK_VERSION=3.1.61
+ARG GIT_URL=https://github.com/ericstoneking/42.git
+ARG GIT_BRANCH=master
+
+###############################################################################
+FROM ubuntu:26.04 AS fortytwo-base
+###############################################################################
+
+SHELL ["/bin/bash", "-c"]
+
+ARG GIT_URL
+ARG GIT_BRANCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        curl \
+        ca-certificates \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Task (go-task) build automation
+RUN sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+# Clone 42 from git
+RUN git clone --depth 1 -b ${GIT_BRANCH} ${GIT_URL} /42
+
+# Copy containers/web overlay from build context (shims, build.sh, ui, etc.)
+COPY . /42/containers/web
+
+WORKDIR /42
+
+###############################################################################
+FROM fortytwo-base AS fortytwo-build-wasm
+###############################################################################
+
+ARG EMSDK_VERSION
+
+# Install Emscripten SDK
+ENV EMSDK=/opt/emsdk
+RUN git clone https://github.com/emscripten-core/emsdk.git ${EMSDK} \
+    && cd ${EMSDK} \
+    && ./emsdk install ${EMSDK_VERSION} \
+    && ./emsdk activate ${EMSDK_VERSION}
+ENV PATH="${EMSDK}:${EMSDK}/upstream/emscripten:${PATH}"
+
+# Install Node.js 24 for build tools and server
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build 42 as WASM
+RUN cd /42/containers/web && bash build.sh
+
+# Copy UI source files into the output directory
+RUN cp -r /42/containers/web/ui /42/containers/web/out/ui
+
+# Record git commit for /version endpoint
+RUN cd /42 && git rev-parse --short HEAD > /42/containers/web/out/.git-commit 2>/dev/null || echo "unknown" > /42/containers/web/out/.git-commit
+
+###############################################################################
+FROM node:24-slim AS fortytwo-web
+###############################################################################
+
+ENV PORT=8042
+ENV ROOT_DIR=/app
+
+COPY --from=fortytwo-build-wasm /42/containers/web/out /app
+COPY --from=fortytwo-build-wasm /42/containers/web/server.js /app/server.js
+
+WORKDIR /app
+EXPOSE 8042
+
+CMD ["node", "server.js"]

@@ -1,0 +1,22 @@
+# compose.yaml — Docker Compose for 42 WASM Web UI
+#
+# Usage:
+#   cd containers/web
+#   docker compose build
+#   docker compose up -d
+#   open http://localhost:8042
+
+services:
+  42-web:
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: fortytwo-web
+      args:
+        GIT_URL: https://github.com/ericstoneking/42.git
+        GIT_BRANCH: master
+    ports:
+      - "${PORT:-8042}:8042"
+    environment:
+      PORT: 8042
+    restart: unless-stopped

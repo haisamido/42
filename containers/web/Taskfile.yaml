@@ -1,0 +1,66 @@
+# Taskfile.yaml — Build automation for 42 WASM Web UI
+#
+# Usage:
+#   cd containers/web
+#   task build
+#   task up
+#   task logs
+#
+# Requires: https://taskfile.dev
+
+version: '3'
+
+vars:
+  COMPOSE_FILE: '{{.TASKFILE_DIR}}/compose.yaml'
+  PORT: '{{.PORT | default "8042"}}'
+
+tasks:
+  build:
+    desc: Build 42-web container image
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build 42-web
+
+  rebuild:
+    desc: Build 42-web container image from scratch (no cache)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web
+
+  up:
+    desc: Start 42-web container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d 42-web
+
+  down:
+    desc: Stop and remove 42-web container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web
+
+  logs:
+    desc: Follow 42-web container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f 42-web
+
+  clean:
+    desc: Remove 42-web container and image
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web
+      - docker rmi $(docker images -q '*/42-web' 2>/dev/null) 2>/dev/null || true
+
+  status:
+    desc: Show container status
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} ps
+
+  shell:
+    desc: Open a shell in the running 42-web container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} exec 42-web /bin/sh
+
+  services:message:
+    desc: Show service access information
+    silent: true
+    cmds:
+      - cmd: echo "---"
+      - cmd: echo "42 WASM Web UI"
+      - cmd: 'echo "  URL:  http://localhost:{{.PORT}}"'
+      - cmd: echo "---"
