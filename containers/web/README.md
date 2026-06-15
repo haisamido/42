@@ -31,10 +31,10 @@ containers/web/
 │   ├── 42wasm_shims.c      OS function stubs (nanosleep, gettimeofday, etc.)
 │   └── 42wasm_export.c     Exported API: sim_init, sim_step, sim_get_state
 └── ui/                  Browser-side code
-    ├── index.html          App shell + embedded GLSL shaders
-    ├── main.js             Bootstrap: wires Worker ↔ viewer ↔ panels
+    ├── index.html          App shell: toolbar, grid layout, GLSL shaders
+    ├── main.js             Orchestrator: TabManager, resize, dialogs, Worker wiring
     ├── sw.js               Service worker (session tracking)
-    ├── styles.css          Dark theme layout
+    ├── styles.css          Catppuccin Mocha dark theme + IDE layout
     ├── core/
     │   ├── SimRunner.js       WASM module lifecycle (init/step/getState)
     │   └── SimWorker.js       Web Worker — runs sim in background thread
@@ -42,11 +42,15 @@ containers/web/
     │   ├── SceneManager.js    Three.js scene (Earth, atmosphere, starfield)
     │   ├── OrbitTrail.js      Ring-buffer orbit trajectory line
     │   └── SpacecraftView.js  SC marker with body-frame axes
+    ├── widgets/
+    │   ├── TabManager.js      Tab bar with closeable tabs for main content
+    │   └── TreeView.js        Hierarchical collapsible tree widget
     └── panels/
-        ├── ControlPanel.js    Init / Play / Pause / Step / Reset + speed slider
+        ├── ControlPanel.js    Toolbar controller (Init/Run/Pause/Step/Reset)
         ├── StatePanel.js      Live telemetry readout
-        ├── ConfigPanel.js     Console output log
-        └── FileBrowser.js     Browse and view InOut/ text files
+        ├── ConfigPanel.js     ConsolePanel (log) + SimConfigPanel (config tab)
+        ├── FileBrowser.js     TreeView-based file browser for MEMFS
+        └── FileEditor.js      Text editor with line numbers + Save/Save&Run
 ```
 
 No existing 42 source files are modified. The WASM build uses shim files that wrap
@@ -148,24 +152,24 @@ Functions that exist in 42's codebase but have no meaning in a WASM environment:
 ### Browser Architecture
 
 ```
-                    ┌──────────────┐
-                    │  index.html  │
-                    │  + main.js   │
-                    └──────┬───────┘
-                           │ postMessage
-           ┌───────────────┼───────────────┐
-           │               │               │
-    ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
-    │ ControlPanel│ │ SceneManager│ │  StatePanel │
-    │  (buttons)  │ │  (Three.js) │ │ (telemetry) │
-    └─────────────┘ └─────────────┘ └─────────────┘
-           │
-           │ Worker messages
-           ▼
-    ┌─────────────┐
-    │  SimWorker   │  ← Web Worker (background thread)
-    │  (WASM sim) │
-    └─────────────┘
+              ┌────────────────────────────────────────────┐
+              │  index.html + main.js (orchestrator)       │
+              ├────────┬───────────────────────────────────┤
+              │ Left   │  TabManager (main content)        │
+              │ Panel  │  ┌─────────┐ ┌──────────────┐    │
+              │ ┌────┐ │  │ 3D View │ │ FileEditor × │    │
+              │ │File│ │  │ (Three) │ │ (text tabs)  │    │
+              │ │Brws│ │  └─────────┘ └──────────────┘    │
+              │ ├────┤ ├──────────────────────────────────┤
+              │ │Stat│ │  ConsolePanel (stdout/stderr)    │
+              │ ├────┤ └──────────────────────────────────┘
+              │ │Cfg │ │         ▲
+              │ └────┘ │         │ postMessage
+              └────────┘         ▼
+                          ┌─────────────┐
+                          │  SimWorker   │  ← Web Worker
+                          │  (WASM sim) │
+                          └─────────────┘
 ```
 
 The simulation runs in a **Web Worker** so the UI stays responsive. The Worker
@@ -182,10 +186,12 @@ state snapshots back to the main thread via `postMessage`.
 | Main → Worker | `{ type: 'STEP' }` | Single step |
 | Main → Worker | `{ type: 'GET_FILES', paths: [...] }` | Read files from MEMFS |
 | Main → Worker | `{ type: 'LIST_DIR', path }` | List directory contents in MEMFS |
+| Main → Worker | `{ type: 'WRITE_FILE', path, content }` | Write content to MEMFS file |
 | Worker → Main | `{ type: 'STATUS', status }` | `loading\|ready\|running\|paused\|done\|error` |
 | Worker → Main | `{ type: 'STATE', state }` | Simulation state snapshot |
 | Worker → Main | `{ type: 'FILES', files }` | Requested file contents |
 | Worker → Main | `{ type: 'DIR_LIST', path, entries }` | Directory listing |
+| Worker → Main | `{ type: 'FILE_WRITTEN', path, success }` | File write result |
 | Worker → Main | `{ type: 'STDOUT', text }` | Simulation stdout |
 
 **Three.js coordinate transform** — 42 uses ECI (Z-up N-frame); Three.js uses Y-up:

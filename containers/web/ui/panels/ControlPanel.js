@@ -1,111 +1,97 @@
 /**
- * ControlPanel — Play/Pause/Step controls and speed slider for 42 simulation.
+ * ControlPanel — Toolbar controller for 42 simulation.
  *
- * Manages the Web Worker lifecycle: sends RUN/PAUSE/STEP messages and
- * adjusts stepsPerBatch for speed control.
+ * Binds to toolbar buttons in the header (Init, Run, Pause, Step, Reset)
+ * and the speed slider. No longer renders its own DOM.
  */
 
 export class ControlPanel {
    /**
-    * @param {HTMLElement} containerEl - DOM element to render controls into
-    * @param {Worker} worker - SimWorker instance
+    * @param {Worker} worker - SimWorker instance (or null, set later)
     */
-   constructor(containerEl, worker) {
-      this.container = containerEl;
+   constructor(worker) {
       this.worker = worker;
       this.status = 'loading';
       this._stepsPerBatch = 100;
-      this.onReset = null; /* Callback set by main.js */
+      this.onReset = null;
 
-      this._render();
+      this._bind();
    }
 
-   _render() {
-      this.container.innerHTML = `
-         <div class="control-panel">
-            <div class="control-buttons">
-               <button id="btn-init" title="Initialize">Init</button>
-               <button id="btn-play" title="Run simulation" disabled>Play</button>
-               <button id="btn-pause" title="Pause simulation" disabled>Pause</button>
-               <button id="btn-step" title="Single step" disabled>Step</button>
-               <button id="btn-reset" title="Reset simulation" disabled>Reset</button>
-            </div>
-            <div class="control-speed">
-               <label for="speed-slider">Speed:</label>
-               <input type="range" id="speed-slider" min="1" max="1000" value="100" step="1">
-               <span id="speed-value">100</span> steps/batch
-            </div>
-            <div class="control-status">
-               Status: <span id="sim-status">loading</span>
-            </div>
-         </div>
-      `;
+   _bind() {
+      this.btnInit  = document.getElementById('btn-init');
+      this.btnRun   = document.getElementById('btn-run');
+      this.btnPause = document.getElementById('btn-pause');
+      this.btnStep  = document.getElementById('btn-step');
+      this.btnReset = document.getElementById('btn-reset');
+      this.speedSlider = document.getElementById('speed-slider');
+      this.speedValue  = document.getElementById('speed-value');
+      this.statusEl    = document.getElementById('status-indicator');
 
-      /* Wire up buttons */
-      this.btnInit  = this.container.querySelector('#btn-init');
-      this.btnPlay  = this.container.querySelector('#btn-play');
-      this.btnPause = this.container.querySelector('#btn-pause');
-      this.btnStep  = this.container.querySelector('#btn-step');
-      this.btnReset = this.container.querySelector('#btn-reset');
-      this.speedSlider = this.container.querySelector('#speed-slider');
-      this.speedValue  = this.container.querySelector('#speed-value');
-      this.statusEl    = this.container.querySelector('#sim-status');
-
-      this.btnInit.addEventListener('click', () => {
+      this.btnInit?.addEventListener('click', () => {
          this.worker.postMessage({ type: 'INIT' });
          this.btnInit.disabled = true;
       });
 
-      this.btnPlay.addEventListener('click', () => {
+      this.btnRun?.addEventListener('click', () => {
          this.worker.postMessage({
             type: 'RUN',
             stepsPerBatch: this._stepsPerBatch,
          });
       });
 
-      this.btnPause.addEventListener('click', () => {
+      this.btnPause?.addEventListener('click', () => {
          this.worker.postMessage({ type: 'PAUSE' });
       });
 
-      this.btnStep.addEventListener('click', () => {
+      this.btnStep?.addEventListener('click', () => {
          this.worker.postMessage({ type: 'STEP' });
       });
 
-      this.btnReset.addEventListener('click', () => {
+      this.btnReset?.addEventListener('click', () => {
          if (this.onReset) this.onReset();
       });
 
-      this.speedSlider.addEventListener('input', () => {
+      this.speedSlider?.addEventListener('input', () => {
          this._stepsPerBatch = parseInt(this.speedSlider.value, 10);
          this.speedValue.textContent = this._stepsPerBatch;
       });
+   }
+
+   setWorker(worker) {
+      this.worker = worker;
    }
 
    /**
     * Update button enabled states based on simulation status.
     * @param {string} status - 'loading'|'ready'|'running'|'paused'|'done'|'error'
     */
-   /** Replace the Worker reference (used after reset) */
-   setWorker(worker) {
-      this.worker = worker;
-   }
-
    setStatus(status) {
       this.status = status;
-      this.statusEl.textContent = status;
+
+      const statusLabels = {
+         loading: 'Loading...',
+         ready: 'Ready',
+         running: 'Running',
+         paused: 'Paused',
+         done: 'Done',
+         error: 'Error',
+      };
+      this.statusEl.textContent = statusLabels[status] || status;
+      this.statusEl.className = status;
 
       const isReady   = status === 'ready' || status === 'paused';
       const isRunning = status === 'running';
       const isDone    = status === 'done';
 
       this.btnInit.disabled  = status !== 'loading' && status !== 'error';
-      this.btnPlay.disabled  = !(isReady);
+      this.btnRun.disabled   = !isReady;
       this.btnPause.disabled = !isRunning;
-      this.btnStep.disabled  = !(isReady);
+      this.btnStep.disabled  = !isReady;
       this.btnReset.disabled = status === 'loading';
 
       if (isDone) {
-         this.btnPlay.disabled = true;
+         this.btnRun.disabled = true;
          this.btnStep.disabled = true;
          this.btnPause.disabled = true;
       }

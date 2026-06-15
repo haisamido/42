@@ -10,12 +10,14 @@
  *   { type: 'STEP' }                    — Single step
  *   { type: 'GET_FILES', paths: [...] } — Read files from MEMFS
  *   { type: 'LIST_DIR', path: '...' }  — List files in a MEMFS directory
+ *   { type: 'WRITE_FILE', path, content } — Write content to MEMFS file
  *
  * Worker → Main:
  *   { type: 'STATUS', status: '...' }   — 'loading'|'ready'|'running'|'paused'|'done'|'error'
  *   { type: 'STATE',  state: {...} }    — Simulation state snapshot
  *   { type: 'FILES',  files: {...} }    — Requested file contents
  *   { type: 'DIR_LIST', path, entries } — Directory listing
+ *   { type: 'FILE_WRITTEN', path, success, error? } — File write result
  *   { type: 'STDOUT', text: '...' }     — Simulation stdout output
  *   { type: 'STDERR', text: '...' }     — Simulation stderr output
  */
@@ -158,6 +160,17 @@ self.onmessage = async function (e) {
 
       case 'LIST_DIR':
          if (mod) listDir(msg.path || '/InOut');
+         break;
+
+      case 'WRITE_FILE':
+         if (mod) {
+            try {
+               mod.FS.writeFile(msg.path, msg.content);
+               self.postMessage({ type: 'FILE_WRITTEN', path: msg.path, success: true });
+            } catch (err) {
+               self.postMessage({ type: 'FILE_WRITTEN', path: msg.path, success: false, error: err.message });
+            }
+         }
          break;
    }
 };

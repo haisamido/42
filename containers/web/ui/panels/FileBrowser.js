@@ -1,138 +1,108 @@
 /**
- * FileBrowser — Browse and view Inp*.txt files from the WASM MEMFS filesystem.
+ * FileBrowser — TreeView-based file browser for MEMFS directories.
  *
- * Shows a file list on the left and file content on the right (or below).
- * Files are read from the Worker via GET_FILES / LIST_DIR messages.
+ * Shows /InOut/ and /Model/ as root folders. Double-click a file to
+ * open it in an editor tab. Lazy-loads subdirectories on expand.
  */
+
+import { TreeView } from '../widgets/TreeView.js';
+
+const ICONS = {
+   dir:  '\u{1F4C1}',  /* folder */
+   txt:  '\u{1F4C4}',  /* document */
+   csv:  '\u{1F4CA}',  /* chart */
+   obj:  '\u{1F4E6}',  /* package (3D model) */
+   default: '\u{1F4C3}', /* page */
+};
+
+function iconFor(name, isDir) {
+   if (isDir) return ICONS.dir;
+   const ext = name.split('.').pop().toLowerCase();
+   return ICONS[ext] || ICONS.default;
+}
 
 export class FileBrowser {
    /**
     * @param {HTMLElement} containerEl - DOM element to render into
-    * @param {Worker} worker - SimWorker instance for MEMFS access
+    * @param {Worker} worker - SimWorker instance
+    * @param {object} callbacks
+    * @param {Function} callbacks.onFileOpen - (path) => void
     */
-   constructor(containerEl, worker) {
+   constructor(containerEl, worker, callbacks = {}) {
       this.container = containerEl;
       this.worker = worker;
-      this._files = [];
-      this._selectedFile = null;
+      this.onFileOpen = callbacks.onFileOpen || (() => {});
       this._ready = false;
-      this._render();
+      this._dirNodes = new Map(); /* path -> tree node */
+
+      this.tree = new TreeView(this.container, {
+         onDblClick: (node) => this._onDblClick(node),
+      });
+
+      /* Create root folder nodes */
+      this._inoutNode = this.tree.addNode(this.tree.root, 'InOut', {
+         type: 'dir', path: '/InOut', isDir: true, expanded: true,
+      }, ICONS.dir);
+
+      this._modelNode = this.tree.addNode(this.tree.root, 'Model', {
+         type: 'dir', path: '/Model', isDir: true, expanded: false,
+      }, ICONS.dir);
+
+      this._dirNodes.set('/InOut', this._inoutNode);
+      this._dirNodes.set('/Model', this._modelNode);
+
+      this.tree.render();
    }
 
-   _render() {
-      this.container.innerHTML = `
-         <div class="file-browser">
-            <div class="file-browser-header">
-               <h3>InOut Files</h3>
-               <button id="btn-refresh-files" title="Refresh file list">Refresh</button>
-            </div>
-            <div class="file-browser-body">
-               <ul id="file-list" class="file-list"></ul>
-            </div>
-         </div>
-      `;
-
-      this.listEl = this.container.querySelector('#file-list');
-      this.container.querySelector('#btn-refresh-files')
-         .addEventListener('click', () => this.requestFileList());
-   }
-
-   /** Replace the Worker reference (used after reset) */
    setWorker(worker) {
       this.worker = worker;
       this._ready = false;
-      this._files = [];
-      this._selectedFile = null;
-      this._renderFileList();
+      /* Clear children but keep root nodes */
+      this.tree.clearChildren(this._inoutNode);
+      this.tree.clearChildren(this._modelNode);
+      this.tree.render();
    }
 
-   /** Called when the Worker becomes ready */
    setReady() {
       this._ready = true;
-      this.requestFileList();
-   }
-
-   /** Ask the Worker to list /InOut/ directory */
-   requestFileList() {
-      if (!this._ready) return;
+      /* Request listing of the default expanded directory */
       this.worker.postMessage({ type: 'LIST_DIR', path: '/InOut' });
    }
 
    /** Handle DIR_LIST response from Worker */
    onDirList(path, entries) {
-      if (path !== '/InOut') return;
+      const parentNode = this._dirNodes.get(path);
+      if (!parentNode) return;
 
-      this._files = entries
-         .filter(e => !e.isDir && e.name.endsWith('.txt'))
-         .map(e => e.name);
+      this.tree.clearChildren(parentNode);
 
-      this._renderFileList();
-   }
+      for (const entry of entries) {
+         const fullPath = path.replace(/\/$/, '') + '/' + entry.name;
+         const node = this.tree.addNode(parentNode, entry.name, {
+            type: entry.isDir ? 'dir' : 'file',
+            path: fullPath,
+            isDir: entry.isDir,
+            expanded: false,
+         }, iconFor(entry.name, entry.isDir));
 
-   /** Handle FILES response from Worker */
-   onFileContent(files) {
-      for (const [path, content] of Object.entries(files)) {
-         if (content !== null) {
-            this._showFileContent(path, content);
+         if (entry.isDir) {
+            this._dirNodes.set(fullPath, node);
          }
       }
+
+      this.tree.render();
    }
 
-   _renderFileList() {
-      this.listEl.innerHTML = '';
+   _onDblClick(node) {
+      if (!node.data) return;
 
-      for (const name of this._files) {
-         const li = document.createElement('li');
-         li.className = 'file-item';
-         if (name === this._selectedFile) {
-            li.classList.add('selected');
+      if (node.data.type === 'file') {
+         this.onFileOpen(node.data.path);
+      } else if (node.data.type === 'dir') {
+         /* If expanding and children not loaded, request listing */
+         if (node.expanded && node.children.length === 0 && this._ready) {
+            this.worker.postMessage({ type: 'LIST_DIR', path: node.data.path });
          }
-         li.textContent = name;
-         li.addEventListener('click', () => this._selectFile(name));
-         this.listEl.appendChild(li);
       }
-   }
-
-   _selectFile(name) {
-      this._selectedFile = name;
-      this._renderFileList();
-      this.worker.postMessage({ type: 'GET_FILES', paths: ['/InOut/' + name] });
-   }
-
-   _showFileContent(path, content) {
-      const name = path.split('/').pop();
-
-      /* Show in a modal overlay */
-      let overlay = document.getElementById('file-viewer-overlay');
-      if (!overlay) {
-         overlay = document.createElement('div');
-         overlay.id = 'file-viewer-overlay';
-         overlay.className = 'file-viewer-overlay';
-         document.body.appendChild(overlay);
-      }
-
-      overlay.innerHTML = `
-         <div class="file-viewer">
-            <div class="file-viewer-header">
-               <span class="file-viewer-title">${name}</span>
-               <button id="btn-close-viewer" title="Close">X</button>
-            </div>
-            <pre class="file-viewer-content">${this._escapeHtml(content)}</pre>
-         </div>
-      `;
-
-      overlay.style.display = 'flex';
-      overlay.querySelector('#btn-close-viewer')
-         .addEventListener('click', () => { overlay.style.display = 'none'; });
-      overlay.addEventListener('click', (e) => {
-         if (e.target === overlay) overlay.style.display = 'none';
-      });
-   }
-
-   _escapeHtml(text) {
-      return text
-         .replace(/&/g, '&amp;')
-         .replace(/</g, '&lt;')
-         .replace(/>/g, '&gt;');
    }
 }

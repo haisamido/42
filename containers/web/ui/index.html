@@ -18,26 +18,67 @@
    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-   <!-- Header -->
+
+   <!-- Header: Title + Toolbar -->
    <header id="app-header">
-      <h1>42 <span class="subtitle">Spacecraft Dynamics Simulation</span></h1>
+      <div id="toolbar">
+         <span class="app-title">42</span>
+         <span class="app-subtitle">Spacecraft Simulation</span>
+         <div class="tb-sep"></div>
+         <button class="tb-btn" id="btn-init" title="Initialize WASM module">Init</button>
+         <button class="tb-btn" id="btn-run" disabled title="Run simulation">&#9654; Run</button>
+         <button class="tb-btn" id="btn-pause" disabled title="Pause simulation">&#10074;&#10074;</button>
+         <button class="tb-btn" id="btn-step" disabled title="Single step">Step</button>
+         <button class="tb-btn" id="btn-reset" disabled title="Reset simulation">Reset</button>
+         <div class="tb-sep"></div>
+         <button class="tb-btn" id="btn-load-sample" title="Load sample configuration">Samples</button>
+         <div class="tb-sep"></div>
+         <label class="speed-control">
+            Speed:
+            <input type="range" id="speed-slider" min="1" max="1000" value="100" step="1">
+            <span id="speed-value">100</span>
+         </label>
+         <span id="status-indicator" class="loading">Loading...</span>
+      </div>
    </header>
 
-   <!-- Main layout: left panel + 3D viewer -->
+   <!-- App Body: Left Panel + Resize Handle + Main Content -->
    <div id="app-body">
-      <!-- Left panel: controls + state -->
       <aside id="left-panel">
-         <div id="control-panel"></div>
-         <div id="state-panel"></div>
-         <div id="file-browser-panel"></div>
+         <div id="left-tabs">
+            <button class="left-tab active" data-tab="files">Files</button>
+            <button class="left-tab" data-tab="state">State</button>
+            <button class="left-tab" data-tab="config">Config</button>
+         </div>
+         <div id="files-panel" class="left-panel-content active"></div>
+         <div id="state-panel" class="left-panel-content"></div>
+         <div id="config-panel" class="left-panel-content"></div>
       </aside>
-
-      <!-- 3D viewer -->
-      <main id="viewer-container"></main>
+      <div class="resize-h" id="resize-h"></div>
+      <main id="main-content">
+         <div id="tab-bar"></div>
+         <div id="tab-content"></div>
+      </main>
    </div>
 
-   <!-- Bottom: console output -->
-   <div id="console-panel"></div>
+   <!-- Vertical resize handle -->
+   <div id="resize-v"></div>
+
+   <!-- Console Panel -->
+   <div id="console-panel">
+      <div id="console-header">
+         Console Output
+         <span class="spacer"></span>
+         <span id="console-line-count">0 lines</span>
+         <button id="console-clear-btn">Clear</button>
+      </div>
+      <div id="console-output"></div>
+   </div>
+
+   <!-- Dialog Overlay -->
+   <div class="dialog-overlay" id="dialog-overlay">
+      <div class="dialog" id="dialog-content"></div>
+   </div>
 
    <!-- Earth shaders (embedded) -->
    <script id="earthVertexShader" type="x-shader/x-vertex">
@@ -63,18 +104,13 @@
 
       void main() {
          vec3 normal = normalize(vNormal);
-
-         // Sun direction in view space
          float sunDot = dot(normal, normalize(uSunDirection));
-
-         // Day/night blend with smooth terminator
          float dayFactor = smoothstep(-0.1, 0.2, sunDot);
 
          vec4 dayColor = texture2D(uDayTexture, vUv);
-         vec3 nightColor = vec3(0.02, 0.02, 0.05); // Dark blue night
+         vec3 nightColor = vec3(0.02, 0.02, 0.05);
 
          vec3 color = mix(nightColor, dayColor.rgb, dayFactor);
-
          gl_FragColor = vec4(color, 1.0);
       }
    </script>
@@ -100,16 +136,13 @@
          vec3 normal = normalize(vNormal);
          vec3 viewDir = normalize(-vPosition);
 
-         // Rim lighting effect
          float rim = 1.0 - max(dot(viewDir, normal), 0.0);
          rim = pow(rim, 3.0);
 
-         // Sun illumination
          float sunDot = max(dot(normal, normalize(uSunDirection)), 0.0);
          float atmoIntensity = rim * (0.3 + 0.7 * sunDot);
 
-         vec3 atmoColor = vec3(0.3, 0.6, 1.0); // Blue atmosphere
-
+         vec3 atmoColor = vec3(0.3, 0.6, 1.0);
          gl_FragColor = vec4(atmoColor, atmoIntensity * 0.6);
       }
    </script>
@@ -119,15 +152,14 @@
       const wasmScript = document.createElement('script');
       wasmScript.src = '../42.js';
       wasmScript.onload = () => {
-         /* 42.js loaded — create42Module is now available on window */
          const appScript = document.createElement('script');
          appScript.type = 'module';
          appScript.src = 'main.js';
          document.body.appendChild(appScript);
       };
       wasmScript.onerror = () => {
-         document.getElementById('console-panel').innerHTML =
-            '<pre style="color:#f44">Failed to load 42.wasm — is the WASM build complete?</pre>';
+         document.getElementById('console-output').innerHTML =
+            '<span class="err">Failed to load 42.wasm — is the WASM build complete?</span>';
       };
       document.body.appendChild(wasmScript);
    </script>
