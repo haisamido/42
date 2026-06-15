@@ -5,6 +5,10 @@
 #   docker compose build
 #   docker compose up -d
 #   open http://localhost:8042
+#
+# Each browser session gets its own directory under
+# ./sessions/<datetime>/<uuid>/InOut/ populated with default InOut/ files
+# on first access.
 
 services:
   42-web:
@@ -19,4 +23,8 @@ services:
       - "${PORT:-8042}:8042"
     environment:
       PORT: 8042
+      SESSION_DIR: /data/sessions
+      DEFAULTS_DIR: /app/defaults/InOut
+    volumes:
+      - "./sessions:/data/sessions"
     restart: unless-stopped

@@ -26,6 +26,7 @@ export class FileEditor {
             <span class="file-path">${this._escapeHtml(filePath)}</span>
             <span class="spacer"></span>
             <span class="dirty-indicator"></span>
+            <span class="sync-status" title="Server sync"></span>
             <button class="tb-btn btn-save">Save</button>
             <button class="tb-btn btn-save-run" style="background:var(--green);color:var(--crust)">Save &amp; Run</button>
          </div>
@@ -38,6 +39,7 @@ export class FileEditor {
       this._textarea = this._el.querySelector('.file-textarea');
       this._lineNumbers = this._el.querySelector('.file-line-numbers');
       this._dirtyEl = this._el.querySelector('.dirty-indicator');
+      this._syncEl = this._el.querySelector('.sync-status');
 
       this._textarea.value = content;
       this._updateLineNumbers();
@@ -97,6 +99,22 @@ export class FileEditor {
       this._onSaveAndRun(this._path, this._textarea.value);
       this._dirty = false;
       this._dirtyEl.textContent = '';
+   }
+
+   /**
+    * Update server sync status indicator.
+    * @param {'synced'|'syncing'|'error'|'unavailable'} status
+    */
+   setSyncStatus(status) {
+      if (!this._syncEl) return;
+      const icons = {
+         synced: '\u2601',       /* cloud = synced */
+         syncing: '\u21BB',      /* clockwise arrows = syncing */
+         error: '\u2601',        /* cloud = error (styled red) */
+         unavailable: '',        /* hidden */
+      };
+      this._syncEl.textContent = icons[status] || '';
+      this._syncEl.className = 'sync-status sync-' + status;
    }
 
    _updateLineNumbers() {

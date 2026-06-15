@@ -14,22 +14,41 @@ import { StatePanel } from './panels/StatePanel.js';
 import { ConsolePanel, SimConfigPanel } from './panels/ConfigPanel.js';
 import { FileBrowser } from './panels/FileBrowser.js';
 import { FileEditor } from './panels/FileEditor.js';
+import { ServerSync } from './core/ServerSync.js';
 
 /* ------------------------------------------------------------------ */
 /* Session ID                                                          */
 /* ------------------------------------------------------------------ */
-const SESSION_ID = sessionStorage.getItem('42-session-id') ||
-   (() => {
-      const id = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
-      sessionStorage.setItem('42-session-id', id);
-      return id;
-   })();
+function sessionTimestamp(d) {
+   const p = (n, w) => String(n).padStart(w, '0');
+   return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1,2)}-${p(d.getUTCDate(),2)}`
+      + `T${p(d.getUTCHours(),2)}${p(d.getUTCMinutes(),2)}${p(d.getUTCSeconds(),2)}`
+      + `.${p(d.getUTCMilliseconds(),3)}`;
+}
+
+const SESSION_ID = (() => {
+   const stored = sessionStorage.getItem('42-session-id');
+   if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored)) {
+      return stored;
+   }
+   const id = crypto.randomUUID();
+   sessionStorage.setItem('42-session-id', id);
+   return id;
+})();
+
+const SESSION_TS = (() => {
+   const stored = sessionStorage.getItem('42-session-ts');
+   if (stored) return stored;
+   const ts = sessionTimestamp(new Date());
+   sessionStorage.setItem('42-session-ts', ts);
+   return ts;
+})();
 
 /* ------------------------------------------------------------------ */
 /* Service Worker                                                      */
 /* ------------------------------------------------------------------ */
 if ('serviceWorker' in navigator) {
-   navigator.serviceWorker.register(`sw.js?sid=${SESSION_ID}`)
+   navigator.serviceWorker.register(`sw.js?sid=${SESSION_ID}&sts=${SESSION_TS}`)
       .then(reg => console.log('[SW] Registered:', reg.scope))
       .catch(err => console.warn('[SW] Registration failed:', err));
 }
@@ -87,6 +106,19 @@ initLeftPanelTabs();
 let worker = null;
 let stopTime = 10000;
 let pendingFileTab = null; /* { path } — waiting for FILES response */
+let pendingFlush = false;  /* true while flushing outputs to server */
+
+/* ------------------------------------------------------------------ */
+/* Server Sync (optional — active when InOut/ volume is mounted)       */
+/* ------------------------------------------------------------------ */
+const serverSync = new ServerSync(SESSION_ID, SESSION_TS);
+const syncIndicator = document.getElementById('sync-indicator');
+const flushBtn = document.getElementById('btn-flush');
+
+function updateSyncIndicator(state) {
+   if (!syncIndicator) return;
+   syncIndicator.className = state; /* sync-on, sync-off, sync-busy, sync-error */
+}
 
 const fileBrowser = new FileBrowser(
    document.getElementById('files-panel'),
@@ -144,6 +176,10 @@ function createWorker() {
             }
             if (msg.status === 'done') {
                consolePanel.appendLine('[42] Simulation complete', 'info');
+               if (serverSync.available) {
+                  consolePanel.appendLine('[Server] Auto-flushing outputs to host...', 'info');
+                  flushOutputs();
+               }
             }
             break;
 
@@ -179,6 +215,29 @@ function createWorker() {
             /* Parse stop time from Inp_Sim.txt if it's in the response */
             if (msg.files['/InOut/Inp_Sim.txt']) {
                parseSimConfig(msg.files['/InOut/Inp_Sim.txt']);
+            }
+
+            /* Handle flush: bulk-write files to server */
+            if (pendingFlush && serverSync.available) {
+               pendingFlush = false;
+               const filesToSync = [];
+               for (const [p, content] of Object.entries(msg.files)) {
+                  if (content != null) {
+                     filesToSync.push({ path: serverSync.toRelPath(p), content });
+                  }
+               }
+               if (filesToSync.length > 0) {
+                  updateSyncIndicator('sync-busy');
+                  serverSync.syncFiles(filesToSync).then(result => {
+                     if (result.success) {
+                        consolePanel.appendLine(`[Server] Flushed ${result.written.length} files to host`, 'info');
+                        updateSyncIndicator('sync-on');
+                     } else {
+                        consolePanel.appendLine(`[Server] Flush errors: ${JSON.stringify(result.errors || result.error)}`, 'stderr');
+                        updateSyncIndicator('sync-error');
+                     }
+                  });
+               }
             }
             break;
 
@@ -234,9 +293,24 @@ function createFileEditorTab(path, content) {
    const editor = new FileEditor(path, content, {
       onSave: (p, c) => {
          worker.postMessage({ type: 'WRITE_FILE', path: p, content: c });
+         /* Dual-write to server if available */
+         if (serverSync.available) {
+            editor.setSyncStatus('syncing');
+            serverSync.writeFile(serverSync.toRelPath(p), c).then(result => {
+               editor.setSyncStatus(result.success ? 'synced' : 'error');
+               if (result.success) {
+                  consolePanel.appendLine(`[Server] Synced: ${p}`, 'info');
+               } else {
+                  consolePanel.appendLine(`[Server] Sync failed: ${p} — ${result.error}`, 'stderr');
+               }
+            });
+         }
       },
       onSaveAndRun: (p, c) => {
          worker.postMessage({ type: 'WRITE_FILE', path: p, content: c });
+         if (serverSync.available) {
+            serverSync.writeFile(serverSync.toRelPath(p), c);
+         }
          consolePanel.appendLine('[42-web] Save & Run: resetting simulation...', 'info');
          resetSimulation();
          /* After reset, auto-init and run */
@@ -245,6 +319,9 @@ function createFileEditorTab(path, content) {
          }, 100);
       },
    });
+   if (!serverSync.available) {
+      editor.setSyncStatus('unavailable');
+   }
 
    tabManager.addTab(tabId, fileName, editor.el, true, { editor, path }, '\u{1F4C4}');
 }
@@ -297,12 +374,56 @@ document.getElementById('btn-load-sample')
    ?.addEventListener('click', () => showSamplesDialog());
 
 /* ------------------------------------------------------------------ */
+/* Flush outputs to server                                             */
+/* ------------------------------------------------------------------ */
+flushBtn?.addEventListener('click', () => flushOutputs());
+
+function flushOutputs() {
+   if (!serverSync.available || !worker) return;
+
+   /* Ask Worker for directory listing, then request all output files */
+   const handler = (e) => {
+      const msg = e.data;
+      if (msg.type === 'DIR_LIST' && msg.path === '/InOut') {
+         worker.removeEventListener('message', handler);
+         /* Get all non-directory files */
+         const filePaths = msg.entries
+            .filter(entry => !entry.isDir)
+            .map(entry => '/InOut/' + entry.name);
+         if (filePaths.length === 0) {
+            consolePanel.appendLine('[Server] No files to flush', 'info');
+            return;
+         }
+         pendingFlush = true;
+         worker.postMessage({ type: 'GET_FILES', paths: filePaths });
+      }
+   };
+   worker.addEventListener('message', handler);
+   worker.postMessage({ type: 'LIST_DIR', path: '/InOut' });
+   consolePanel.appendLine('[Server] Flushing outputs...', 'info');
+   updateSyncIndicator('sync-busy');
+}
+
+/* ------------------------------------------------------------------ */
 /* Bootstrap                                                           */
 /* ------------------------------------------------------------------ */
 createWorker();
 controlPanel.setStatus('loading');
 consolePanel.appendLine('[42-web] UI loaded, waiting for WASM initialization...', 'info');
+consolePanel.appendLine(`[42-web] Session Date Time: ${SESSION_TS}`, 'info');
 consolePanel.appendLine(`[42-web] Session: ${SESSION_ID}`, 'info');
+
+/* Check server sync availability */
+serverSync.checkAvailability().then(available => {
+   if (available) {
+      updateSyncIndicator('sync-on');
+      if (flushBtn) flushBtn.disabled = false;
+      consolePanel.appendLine('[Server] InOut/ volume mounted — server sync enabled', 'info');
+   } else {
+      updateSyncIndicator('sync-off');
+      consolePanel.appendLine('[Server] No InOut/ volume mounted — MEMFS only', 'info');
+   }
+});
 
 /* ================================================================== */
 /* Helper: Left panel tab switching                                    */

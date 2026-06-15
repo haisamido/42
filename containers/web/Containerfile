@@ -76,9 +76,17 @@ FROM node:24-slim AS fortytwo-web
 
 ENV PORT=8042
 ENV ROOT_DIR=/app
+ENV SESSION_DIR=/data/sessions
+ENV DEFAULTS_DIR=/app/defaults/InOut
+
+# Default InOut/ files for populating new sessions
+COPY --from=fortytwo-build-wasm /42/InOut /app/defaults/InOut
 
 COPY --from=fortytwo-build-wasm /42/containers/web/out /app
 COPY --from=fortytwo-build-wasm /42/containers/web/server.js /app/server.js
+
+# Mount point for per-session directories
+RUN mkdir -p /data/sessions
 
 WORKDIR /app
 EXPOSE 8042

@@ -37,7 +37,8 @@ containers/web/
     ├── styles.css          Catppuccin Mocha dark theme + IDE layout
     ├── core/
     │   ├── SimRunner.js       WASM module lifecycle (init/step/getState)
-    │   └── SimWorker.js       Web Worker — runs sim in background thread
+    │   ├── SimWorker.js       Web Worker — runs sim in background thread
+    │   └── ServerSync.js      Client wrapper for /api/files/* REST API
     ├── viewer/
     │   ├── SceneManager.js    Three.js scene (Earth, atmosphere, starfield)
     │   ├── OrbitTrail.js      Ring-buffer orbit trajectory line
@@ -204,12 +205,15 @@ Three.z = -42.PosN[1]
 
 ### Server (server.js)
 
-Minimal Node.js static file server:
+Node.js server with static file serving and per-session file sync API:
 
 - Serves WASM artifacts from `/` and UI files from `/ui/`
 - MIME types: `.wasm` → `application/wasm`, `.data` → `application/octet-stream`
 - CORS headers for development
 - `/version` endpoint returning the git commit hash
+- `/api/files/*` REST API for per-session file persistence (see below)
+- UUIDv4 session ID validation, path traversal protection
+- Auto-populates new session directories with default InOut/ files
 - Port 8042 (configurable via `PORT` env var)
 
 ## Task Commands
@@ -225,6 +229,50 @@ Minimal Node.js static file server:
 | `task shell` | Open shell in running container |
 | `task services:message` | Show service URL |
 | `task clean` | Remove container and image |
+
+## Server-Side File Sync
+
+By default, all file I/O happens in Emscripten's MEMFS (browser memory) and is lost
+on page reload. The server provides per-session file persistence: each browser session
+gets its own directory on the host, auto-populated with default `InOut/` files on
+first access.
+
+```
+containers/web/sessions/
+├── 2026-06-15T215341.130/
+│   └── a1b2c3d4-e5f6-4789-abcd-ef0123456789/
+│       └── InOut/      ← Session 1's files
+├── 2026-06-15T220105.456/
+│   └── f9e8d7c6-b5a4-4321-9876-543210fedcba/
+│       └── InOut/      ← Session 2's files
+└── ...
+```
+
+The `sessions/` directory is Docker-mounted to `/data/sessions` in the container.
+Default `InOut/` files (from the 42 source tree) are bundled in the container image
+at `/app/defaults/InOut/` and copied into each new session directory automatically.
+
+When sync is active, the UI shows a green cloud icon in the toolbar and:
+- **Save** in the file editor writes to both MEMFS and the session directory
+- **Flush** button writes all MEMFS `/InOut/` files to the session directory
+- Simulation outputs are auto-flushed when the sim completes
+
+### File API
+
+The server exposes REST endpoints under `/api/files/`. All endpoints except `status`
+require a valid `X-Session-ID` header (UUIDv4 format, injected automatically by the
+Service Worker).
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/files/status` | Check if server sync is available |
+| `GET` | `/api/files/list?dir=<rel>` | List directory contents |
+| `GET` | `/api/files/read?path=<rel>` | Read a file |
+| `POST` | `/api/files/write` | Write `{ path, content }` |
+| `POST` | `/api/files/sync` | Bulk write `{ files: [{ path, content }] }` |
+
+File paths are relative within the session's `InOut/` directory. The session ID
+determines which directory is used: `/data/session/<uuid>/InOut/`.
 
 ## Known Limitations
 

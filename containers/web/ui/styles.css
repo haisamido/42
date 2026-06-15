@@ -122,6 +122,31 @@ body {
 #status-indicator.paused { color: var(--peach); }
 #status-indicator.done { color: var(--accent); }
 #status-indicator.error { color: var(--red); }
+
+/* sync indicator */
+#sync-indicator {
+  font-size: 14px;
+  margin-left: 6px;
+  opacity: 0.5;
+  cursor: default;
+}
+#sync-indicator.sync-on { color: var(--green); opacity: 1; }
+#sync-indicator.sync-off { color: var(--overlay0); opacity: 0.4; }
+#sync-indicator.sync-busy { color: var(--yellow); opacity: 1; animation: pulse 1s infinite; }
+#sync-indicator.sync-error { color: var(--red); opacity: 1; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* per-file sync status in editor toolbar */
+.sync-status {
+  font-size: 12px;
+  margin-right: 4px;
+  opacity: 0.5;
+}
+.sync-status.sync-synced { color: var(--green); opacity: 1; }
+.sync-status.sync-syncing { color: var(--yellow); opacity: 1; animation: pulse 0.8s infinite; }
+.sync-status.sync-error { color: var(--red); opacity: 1; }
+.sync-status.sync-unavailable { display: none; }
 #status-indicator.loading { color: var(--subtext0); }
 
 /* ========== app body ========== */

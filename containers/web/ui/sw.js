@@ -5,7 +5,9 @@
  * for server-side request tracking and logging.
  */
 
-const SESSION_ID = new URL(self.location.href).searchParams.get('sid') || '-';
+const params = new URL(self.location.href).searchParams;
+const SESSION_ID = params.get('sid') || '-';
+const SESSION_TS = params.get('sts') || '-';
 
 self.addEventListener('install', () => {
    self.skipWaiting();
@@ -26,6 +28,7 @@ self.addEventListener('fetch', (event) => {
 
    const headers = new Headers(event.request.headers);
    headers.set('X-Session-ID', SESSION_ID);
+   headers.set('X-Session-TS', SESSION_TS);
 
    const modified = new Request(event.request, {
       headers,
