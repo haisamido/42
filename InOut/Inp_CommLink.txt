@@ -1,5 +1,5 @@
 <<<<<<<<<<<<<<<<<<<  42: Comm Link Description File   >>>>>>>>>>>>>>>>>>>
-0                    ! Number of Links
+2                    ! Number of Links
 ===============================  Link 0  ================================
 S-Band Uplink        ! Description
 TRUE                 ! Comm Link Exists
