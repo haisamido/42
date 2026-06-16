@@ -61,6 +61,9 @@ export class ControlPanel {
       this.speedSlider?.addEventListener('input', () => {
          this._stepsPerBatch = parseInt(this.speedSlider.value, 10);
          this.speedValue.textContent = this._stepsPerBatch;
+         if (this.worker) {
+            this.worker.postMessage({ type: 'SET_SPEED', stepsPerBatch: this._stepsPerBatch });
+         }
       });
    }
 

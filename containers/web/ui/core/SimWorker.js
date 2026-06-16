@@ -160,6 +160,10 @@ self.onmessage = async function (e) {
          runBatch();
          break;
 
+      case 'SET_SPEED':
+         stepsPerBatch = msg.stepsPerBatch || 100;
+         break;
+
       case 'PAUSE':
          running = false;
          postStatus('paused');

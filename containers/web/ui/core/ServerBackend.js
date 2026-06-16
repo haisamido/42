@@ -34,6 +34,7 @@ export class ServerBackend {
       this._listeners = new Map();
       this._eventSource = null;
       this._statePoller = null;
+      this._pollInterval = 500; /* ms between state polls, adjusted by speed slider */
    }
 
    /* ------------------------------------------------------------------ */
@@ -71,6 +72,7 @@ export class ServerBackend {
          case 'RUN':        this._startSim(); break;
          case 'PAUSE':      this._stopSim(); break;
          case 'STEP':       /* not supported */ break;
+         case 'SET_SPEED':  this._setSpeed(msg.stepsPerBatch || 100); break;
          case 'GET_FILES':  this._getFiles(msg.paths || []); break;
          case 'LIST_DIR':   this._listDir(msg.path || '/InOut'); break;
          case 'WRITE_FILE': this._writeFile(msg.path, msg.content); break;
@@ -194,13 +196,23 @@ export class ServerBackend {
 
    _startStatePoller() {
       this._stopStatePoller();
-      this._statePoller = setInterval(() => this._fetchState(), 500);
+      this._statePoller = setInterval(() => this._fetchState(), this._pollInterval);
    }
 
    _stopStatePoller() {
       if (this._statePoller) {
          clearInterval(this._statePoller);
          this._statePoller = null;
+      }
+   }
+
+   /** Map speed slider value (1–1000) to polling interval.
+    *  speed 1 → 2000ms, speed 100 → 500ms, speed 1000 → 50ms */
+   _setSpeed(speed) {
+      this._pollInterval = Math.max(50, Math.round(50000 / speed));
+      /* Restart poller with new interval if currently polling */
+      if (this._statePoller) {
+         this._startStatePoller();
       }
    }
 
