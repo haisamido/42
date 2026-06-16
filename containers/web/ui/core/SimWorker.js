@@ -36,8 +36,10 @@ function postStatus(status) {
 function getState() {
    const ptr = mod._sim_get_state();
    const f64 = new Float64Array(mod.HEAPF64.buffer, ptr, 16);
+   const stop = mod._sim_get_stoptime();
+   const rawTime = f64[0];
    return {
-      simTime: f64[0],
+      simTime: (rawTime > stop) ? stop : rawTime,
       posN:    [f64[1], f64[2], f64[3]],
       velN:    [f64[4], f64[5], f64[6]],
       qbn:     [f64[7], f64[8], f64[9], f64[10]],

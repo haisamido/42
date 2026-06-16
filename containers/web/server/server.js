@@ -118,6 +118,9 @@ function startSim() {
       return { success: false, error: 'Simulation already running' };
    }
 
+   /* Re-read stopTime in case user edited Inp_Sim.txt between runs */
+   cachedStopTime = null;
+
    const proc = spawn(BIN_42, [INOUT_DIR + '/'], {
       cwd: ROOT_DIR,
       env: { ...process.env, DISPLAY: '' },
@@ -176,15 +179,47 @@ function getSimStatus() {
    };
 }
 
-/** Read the last non-empty line of a file. Returns null on error. */
+/** Read the last non-empty line of a file by reading only the tail.
+ *  Reads at most `tailBytes` from the end of the file instead of the
+ *  entire contents, keeping I/O constant regardless of file size. */
+const TAIL_BYTES = 512;
+
 function readLastLine(filePath) {
+   let fd;
    try {
-      const data = fs.readFileSync(filePath, 'utf8');
-      const lines = data.trimEnd().split('\n');
-      return lines[lines.length - 1] || null;
+      fd = fs.openSync(filePath, 'r');
+      const stat = fs.fstatSync(fd);
+      if (stat.size === 0) return null;
+
+      const readSize = Math.min(TAIL_BYTES, stat.size);
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, stat.size - readSize);
+      const chunk = buf.toString('utf8').trimEnd();
+      const nl = chunk.lastIndexOf('\n');
+      return nl === -1 ? chunk : chunk.slice(nl + 1);
    } catch (e) {
       return null;
+   } finally {
+      if (fd !== undefined) fs.closeSync(fd);
    }
+}
+
+/** Cached stopTime — parsed once per sim start, cleared on process exit. */
+let cachedStopTime = null;
+
+function getStopTime() {
+   if (cachedStopTime != null) return cachedStopTime;
+   try {
+      const txt = fs.readFileSync(path.join(INOUT_DIR, 'Inp_Sim.txt'), 'utf8');
+      for (const line of txt.split('\n')) {
+         if (/STOPTIME/i.test(line)) {
+            const m = line.match(/([\d.eE+-]+)/);
+            if (m) { cachedStopTime = parseFloat(m[1]); return cachedStopTime; }
+            break;
+         }
+      }
+   } catch (e) { /* ignore */ }
+   return Infinity;
 }
 
 /** Read current simulation state from 42's output files. */
@@ -192,7 +227,9 @@ function getSimState() {
    const timeLine = readLastLine(path.join(INOUT_DIR, 'time.42'));
    if (!timeLine) return null;
 
-   const simTime = parseFloat(timeLine);
+   const rawTime = parseFloat(timeLine);
+   const stop = getStopTime();
+   const simTime = (rawTime > stop) ? stop : rawTime;
 
    const parseLine = (file, count) => {
       const line = readLastLine(path.join(INOUT_DIR, file));
@@ -206,26 +243,13 @@ function getSimState() {
    const qbn  = parseLine('qbn.42', 4);
    const svn  = parseLine('svn.42', 3);
 
-   /* Read STOPTIME from Inp_Sim.txt for done detection */
-   let stopTime = Infinity;
-   try {
-      const txt = fs.readFileSync(path.join(INOUT_DIR, 'Inp_Sim.txt'), 'utf8');
-      for (const line of txt.split('\n')) {
-         if (/STOPTIME/i.test(line)) {
-            const m = line.match(/([\d.eE+-]+)/);
-            if (m) stopTime = parseFloat(m[1]);
-            break;
-         }
-      }
-   } catch (e) { /* ignore */ }
-
    return {
       simTime,
       posN,
       velN,
       qbn,
       svn,
-      done: simTime >= stopTime,
+      done: rawTime > stop,
    };
 }
 

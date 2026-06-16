@@ -47,8 +47,8 @@ double *sim_get_state(void)
 {
    long i;
 
-   State.SimTime = SimTime;
-   State.Done = (SimTime >= STOPTIME) ? 1.0 : 0.0;
+   State.SimTime = (SimTime > STOPTIME) ? STOPTIME : SimTime;
+   State.Done = (SimTime > STOPTIME) ? 1.0 : 0.0;
 
    if (Nsc > 0 && SC[0].Exists) {
       for (i = 0; i < 3; i++) {
