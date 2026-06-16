@@ -38,13 +38,14 @@ services:
       - "${WEB_PORT:-8043}:8043"
     environment:
       PORT: 8043
-      INOUT_DIR: /app/InOut
+      SESSION_DIR: /data/sessions
       MODEL_DIR: /app/Model
       WORLD_DIR: /app/World
+      SAMPLES_DIR: /app/samples
       BIN_42: /app/42
     volumes:
-      - "../../InOut:/app/InOut"
-      - "../../Model:/app/Model"
+      - "./server/sessions:/data/sessions"
+      - "../../Model:/app/Model:ro"
       - "../../World:/app/World:ro"
       - "./42/InOut:/app/overrides/InOut:ro"
       - "./42/Model:/app/overrides/Model:ro"

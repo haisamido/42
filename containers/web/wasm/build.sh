@@ -127,11 +127,20 @@ emcc "${ALL_SOURCES[@]}" \
     -s INITIAL_MEMORY=67108864 \
     --preload-file "${ROOT_DIR}/InOut@/InOut" \
     --preload-file "${ROOT_DIR}/Model@/Model" \
+    --preload-file "${ROOT_DIR}/InOut@/samples/InOut" \
+    --preload-file "${ROOT_DIR}/Demo@/samples/Demo" \
+    --preload-file "${ROOT_DIR}/Standalone@/samples/Standalone" \
+    --preload-file "${ROOT_DIR}/Tx@/samples/Tx" \
+    --preload-file "${ROOT_DIR}/LunarComm@/samples/LunarComm" \
+    --preload-file "${ROOT_DIR}/Rx@/samples/Rx" \
     --exclude-file "*.ppm" \
     --exclude-file "*.wings" \
     --exclude-file "*.png" \
     --exclude-file "*.xcf" \
     --exclude-file "*.dSYM" \
+    --exclude-file "*.42" \
+    --exclude-file "*.csv" \
+    --exclude-file "*.ipynb" \
     -o "${OUT_DIR}/42.js"
 
 echo ""
@@ -141,4 +150,4 @@ echo ""
 echo "Files:"
 echo "  ${OUT_DIR}/42.js    — Module loader"
 echo "  ${OUT_DIR}/42.wasm  — Compiled simulation"
-echo "  ${OUT_DIR}/42.data  — Preloaded data files (InOut/ + Model/ + World/)"
+echo "  ${OUT_DIR}/42.data  — Preloaded data files (InOut/ + Model/ + samples/)"

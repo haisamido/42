@@ -196,5 +196,74 @@ self.onmessage = async function (e) {
             }
          }
          break;
+
+      case 'LIST_SAMPLES':
+         if (mod) listSamples();
+         break;
+
+      case 'LOAD_SAMPLE':
+         if (mod) loadSample(msg.name);
+         break;
    }
 };
+
+/* ------------------------------------------------------------------ */
+/* Sample scenario management (WASM mode)                              */
+/* ------------------------------------------------------------------ */
+
+function listSamples() {
+   try {
+      const dirs = mod.FS.readdir('/samples').filter(n => n !== '.' && n !== '..');
+      const samples = [];
+      for (const name of dirs) {
+         try {
+            mod.FS.stat(`/samples/${name}/Inp_Sim.txt`);
+            samples.push({ name });
+         } catch (e) { /* skip dirs without Inp_Sim.txt */ }
+      }
+      samples.sort((a, b) => a.name.localeCompare(b.name));
+      self.postMessage({ type: 'SAMPLES_LIST', samples });
+   } catch (e) {
+      self.postMessage({ type: 'SAMPLES_LIST', samples: [], error: e.message });
+   }
+}
+
+function loadSample(name) {
+   try {
+      running = false;
+      const samplePath = `/samples/${name}`;
+
+      /* Verify sample exists */
+      mod.FS.stat(`${samplePath}/Inp_Sim.txt`);
+
+      /* Clear /InOut/ of existing files (keep directory) */
+      const oldFiles = mod.FS.readdir('/InOut').filter(n => n !== '.' && n !== '..');
+      for (const f of oldFiles) {
+         try {
+            const stat = mod.FS.stat(`/InOut/${f}`);
+            if (mod.FS.isFile(stat.mode)) mod.FS.unlink(`/InOut/${f}`);
+         } catch (e) { /* skip */ }
+      }
+
+      /* Copy all files from sample into /InOut/ */
+      const entries = mod.FS.readdir(samplePath).filter(n => n !== '.' && n !== '..');
+      for (const f of entries) {
+         try {
+            const stat = mod.FS.stat(`${samplePath}/${f}`);
+            if (mod.FS.isFile(stat.mode)) {
+               const data = mod.FS.readFile(`${samplePath}/${f}`);
+               mod.FS.writeFile(`/InOut/${f}`, data);
+            }
+         } catch (e) { /* skip */ }
+      }
+
+      /* Re-initialize simulation with new config */
+      mod._sim_init();
+
+      self.postMessage({ type: 'SAMPLE_LOADED', name, success: true });
+      postStatus('ready');
+   } catch (e) {
+      self.postMessage({ type: 'SAMPLE_LOADED', name, success: false, error: e.message });
+      postStatus('error');
+   }
+}

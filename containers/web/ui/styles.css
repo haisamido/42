@@ -89,6 +89,21 @@ body {
 #btn-run:hover:not(:disabled) { opacity: 0.85; }
 #btn-run:disabled { background: var(--surface1); color: var(--overlay0); opacity: 0.6; }
 
+.tb-select {
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+}
+.tb-select:hover { border-color: var(--accent); }
+.tb-select:focus { border-color: var(--accent); }
+.tb-select:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 
 .speed-control {

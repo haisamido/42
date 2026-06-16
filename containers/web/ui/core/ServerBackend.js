@@ -73,9 +73,11 @@ export class ServerBackend {
          case 'PAUSE':      this._stopSim(); break;
          case 'STEP':       /* not supported */ break;
          case 'SET_SPEED':  this._setSpeed(msg.stepsPerBatch || 100); break;
-         case 'GET_FILES':  this._getFiles(msg.paths || []); break;
-         case 'LIST_DIR':   this._listDir(msg.path || '/InOut'); break;
-         case 'WRITE_FILE': this._writeFile(msg.path, msg.content); break;
+         case 'GET_FILES':    this._getFiles(msg.paths || []); break;
+         case 'LIST_DIR':     this._listDir(msg.path || '/InOut'); break;
+         case 'WRITE_FILE':   this._writeFile(msg.path, msg.content); break;
+         case 'LIST_SAMPLES': this._listSamples(); break;
+         case 'LOAD_SAMPLE':  this._loadSample(msg.name); break;
       }
    }
 
@@ -302,6 +304,46 @@ export class ServerBackend {
             success: false,
             error: e.message,
          });
+      }
+   }
+
+   /* ------------------------------------------------------------------ */
+   /* Sample scenario management via REST API                             */
+   /* ------------------------------------------------------------------ */
+
+   async _listSamples() {
+      try {
+         const res = await fetch('/api/samples/list');
+         if (res.ok) {
+            const data = await res.json();
+            this._emit({ type: 'SAMPLES_LIST', samples: data.samples || [] });
+         } else {
+            this._emit({ type: 'SAMPLES_LIST', samples: [] });
+         }
+      } catch (e) {
+         this._emit({ type: 'SAMPLES_LIST', samples: [], error: e.message });
+      }
+   }
+
+   async _loadSample(name) {
+      try {
+         const res = await fetch('/api/samples/load', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+         });
+         const data = await res.json();
+         this._emit({
+            type: 'SAMPLE_LOADED',
+            name,
+            success: data.success === true,
+            error: data.error,
+         });
+         if (data.success) {
+            this._emit({ type: 'STATUS', status: 'ready' });
+         }
+      } catch (e) {
+         this._emit({ type: 'SAMPLE_LOADED', name, success: false, error: e.message });
       }
    }
 }

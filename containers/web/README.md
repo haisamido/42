@@ -26,7 +26,8 @@ containers/web/
 │   ├── server.js           Node.js static file server
 │   └── shims/              C shim files for WASM export (42wasm_export.c)
 └── server/              Native-specific: process manager server
-    └── server.js           Node.js server with IPC, SSE, process management
+    ├── server.js           Node.js server with IPC, SSE, process management
+    └── sessions/           Per-session working directories (gitignored)
 ```
 
 ## Quick Start
@@ -51,6 +52,20 @@ Both services share the same UI (`ui/`) and mount `World/` for planet textures.
 Server mode uses 42's built-in IPC TCP sockets for real-time state streaming
 (configured via `Inp_IPC.txt` with SC and Orb prefixes). State is pushed to
 the browser via SSE, eliminating file-based polling.
+
+## Sample Scenarios
+
+Six sample scenarios are available from the toolbar dropdown: InOut (default),
+Demo, Standalone, Tx, LunarComm, and Rx. Selecting a scenario copies its files
+into the active session working directory.
+
+## Sessions
+
+Server mode uses per-session working directories to isolate simulation state.
+Each server start creates a timestamped session under `server/sessions/`
+(or `SESSION_DIR` in Docker). The host's `InOut/`, `Model/`, and `World/`
+directories are never modified — `Model/` and `World/` are mounted read-only,
+and `InOut/` is copied from samples into the session at startup.
 
 ## Override Directory
 

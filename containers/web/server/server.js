@@ -10,11 +10,23 @@ const { spawn } = require('child_process');
 
 const PORT       = parseInt(process.env.PORT || '8043', 10);
 const ROOT_DIR   = process.env.ROOT_DIR   || path.join(__dirname);
-const INOUT_DIR  = process.env.INOUT_DIR  || path.join(ROOT_DIR, 'InOut');
 const MODEL_DIR  = process.env.MODEL_DIR  || path.join(ROOT_DIR, 'Model');
 const WORLD_DIR  = process.env.WORLD_DIR  || path.join(ROOT_DIR, 'World');
 const BIN_42     = process.env.BIN_42     || path.join(ROOT_DIR, '42');
 const OVERRIDE_DIR = process.env.OVERRIDE_DIR || path.join(ROOT_DIR, 'overrides');
+const SAMPLES_DIR  = process.env.SAMPLES_DIR  || path.join(ROOT_DIR, 'samples');
+const SESSION_DIR  = process.env.SESSION_DIR  || path.join(__dirname, 'sessions');
+
+/* Session: each server start gets a unique working directory */
+const SESSION_ID = (() => {
+   const d = new Date();
+   const p = (n, w) => String(n).padStart(w, '0');
+   return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1,2)}-${p(d.getUTCDate(),2)}`
+      + `T${p(d.getUTCHours(),2)}${p(d.getUTCMinutes(),2)}${p(d.getUTCSeconds(),2)}`
+      + `.${p(d.getUTCMilliseconds(),3)}`;
+})();
+const SESSION_PATH = path.join(SESSION_DIR, SESSION_ID);
+const INOUT_DIR    = path.join(SESSION_PATH, 'InOut');
 
 /* Read git commit from build artifact */
 let GIT_COMMIT = 'unknown';
@@ -643,6 +655,41 @@ const server = http.createServer(async (req, res) => {
    }
 
    /* ============================================================== */
+   /* Samples API (/api/samples/*)                                    */
+   /* ============================================================== */
+
+   if (urlPath.startsWith('/api/samples/')) {
+
+      /* GET /api/samples/list — list available sample scenarios */
+      if (urlPath === '/api/samples/list' && req.method === 'GET') {
+         const samples = listSamples();
+         const size = sendJSON(res, 200, { samples });
+         logReq(req, 200, size);
+         return;
+      }
+
+      /* POST /api/samples/load — load a sample scenario into InOut */
+      if (urlPath === '/api/samples/load' && req.method === 'POST') {
+         try {
+            const raw = await readBody(req, 1024);
+            const { name } = JSON.parse(raw);
+            const result = loadSample(name);
+            const code = result.success ? 200 : (result.error === 'Sample not found' ? 404 : 400);
+            const size = sendJSON(res, code, result);
+            logReq(req, code, size);
+         } catch (e) {
+            const size = sendJSON(res, 400, { success: false, error: e.message });
+            logReq(req, 400, size);
+         }
+         return;
+      }
+
+      const size = sendJSON(res, 404, { error: 'Unknown samples endpoint' });
+      logReq(req, 404, size);
+      return;
+   }
+
+   /* ============================================================== */
    /* File API (/api/files/*)                                         */
    /* ============================================================== */
 
@@ -913,14 +960,84 @@ function copyDirRecursive(src, dst) {
    }
 }
 
+/* ------------------------------------------------------------------ */
+/* Session initialization                                              */
+/* Create session directory and populate InOut from default sample.     */
+/* ------------------------------------------------------------------ */
+
+function initSession() {
+   fs.mkdirSync(INOUT_DIR, { recursive: true });
+   /* Copy default InOut from samples */
+   const defaultInOut = path.join(SAMPLES_DIR, 'InOut');
+   if (fs.existsSync(defaultInOut)) {
+      copyDirRecursive(defaultInOut, INOUT_DIR);
+      console.log(`${timestamp()} Session initialized from samples/InOut`);
+   } else {
+      console.warn(`${timestamp()} Warning: default sample InOut not found at ${defaultInOut}`);
+   }
+}
+
+initSession();
 mergeOverrides();
+
+/* ------------------------------------------------------------------ */
+/* Sample scenario management                                          */
+/* ------------------------------------------------------------------ */
+
+/** List available sample scenarios from SAMPLES_DIR. */
+function listSamples() {
+   const samples = [];
+   try {
+      const dirs = fs.readdirSync(SAMPLES_DIR, { withFileTypes: true })
+         .filter(d => d.isDirectory())
+         .sort((a, b) => a.name.localeCompare(b.name));
+      for (const d of dirs) {
+         const simFile = path.join(SAMPLES_DIR, d.name, 'Inp_Sim.txt');
+         if (!fs.existsSync(simFile)) continue;
+         samples.push({ name: d.name });
+      }
+   } catch (e) { /* SAMPLES_DIR doesn't exist */ }
+   return samples;
+}
+
+/** Load a sample scenario: copy its files into INOUT_DIR. */
+function loadSample(name) {
+   if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      return { success: false, error: 'Invalid sample name' };
+   }
+   const sampleDir = path.join(SAMPLES_DIR, name);
+   if (!fs.existsSync(sampleDir) || !fs.existsSync(path.join(sampleDir, 'Inp_Sim.txt'))) {
+      return { success: false, error: 'Sample not found' };
+   }
+   /* Stop running simulation if any */
+   if (sim && sim.status === 'running') stopSim();
+
+   /* Clear session InOut completely and re-create */
+   fs.rmSync(INOUT_DIR, { recursive: true, force: true });
+   fs.mkdirSync(INOUT_DIR, { recursive: true });
+
+   /* Copy sample files into session InOut */
+   copyDirRecursive(sampleDir, INOUT_DIR);
+
+   /* Re-apply overrides on top of the new sample */
+   const overrideInOut = path.join(OVERRIDE_DIR, 'InOut');
+   if (fs.existsSync(overrideInOut)) {
+      copyDirRecursive(overrideInOut, INOUT_DIR);
+   }
+   cachedStopTime = null;
+   console.log(`${timestamp()} Loaded sample: ${name}`);
+   return { success: true, name };
+}
 
 server.listen(PORT, () => {
    console.log(`${timestamp()} 42-web server listening on http://0.0.0.0:${PORT}`);
    console.log(`${timestamp()} Serving: ${ROOT_DIR}`);
+   console.log(`${timestamp()} Session: ${SESSION_ID}`);
+   console.log(`${timestamp()} Session path: ${SESSION_PATH}`);
    console.log(`${timestamp()} InOut: ${INOUT_DIR}`);
    console.log(`${timestamp()} Model: ${MODEL_DIR}`);
    console.log(`${timestamp()} World: ${WORLD_DIR}`);
+   console.log(`${timestamp()} Samples: ${SAMPLES_DIR}`);
    console.log(`${timestamp()} 42 binary: ${BIN_42}`);
    console.log(`${timestamp()} Git commit: ${GIT_COMMIT}`);
 });

@@ -698,6 +698,12 @@ class MapView {
       this._scLng = 0;
       this._simTime = 0;
 
+      /* Map viewport (computed in _onResize, 2:1 Mercator aspect ratio) */
+      this._mapX = 0;
+      this._mapY = 0;
+      this._mapW = 0;
+      this._mapH = 0;
+
       /* Resize */
       this._resizeObserver = new ResizeObserver(() => this._onResize());
       this._resizeObserver.observe(this.container);
@@ -759,54 +765,52 @@ class MapView {
    _draw() {
       const ctx = this.ctx;
       /* Use CSS dimensions since setTransform scales to device pixels */
-      const w = this.container.clientWidth;
-      const h = this.container.clientHeight;
-      if (w === 0 || h === 0) return;
+      const cw = this.container.clientWidth;
+      const ch = this.container.clientHeight;
+      if (cw === 0 || ch === 0) return;
 
-      /* Clear */
-      ctx.clearRect(0, 0, w, h);
+      /* Clear full canvas with dark background (letterbox fill) */
+      ctx.fillStyle = '#0a1628';
+      ctx.fillRect(0, 0, cw, ch);
 
-      /* Background: map texture or solid color */
+      /* Draw map texture into the 2:1 viewport */
       if (this._mapBitmap) {
-         ctx.drawImage(this._mapBitmap, 0, 0, w, h);
-      } else {
-         ctx.fillStyle = '#0a1628';
-         ctx.fillRect(0, 0, w, h);
+         ctx.drawImage(this._mapBitmap, this._mapX, this._mapY, this._mapW, this._mapH);
       }
 
-      /* Day/night terminator overlay */
-      this._drawTerminator(ctx, w, h);
+      /* Clip to map viewport for overlays */
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(this._mapX, this._mapY, this._mapW, this._mapH);
+      ctx.clip();
 
-      /* Lat/lng grid */
-      this._drawGrid(ctx, w, h);
+      this._drawTerminator(ctx);
+      this._drawGrid(ctx);
+      this._drawTrack(ctx);
+      this._drawSCMarker(ctx);
+      this._drawSunMarker(ctx);
 
-      /* Ground track */
-      this._drawTrack(ctx, w, h);
+      ctx.restore();
 
-      /* Sub-satellite point marker */
-      this._drawSCMarker(ctx, w, h);
-
-      /* Sun sub-solar point */
-      this._drawSunMarker(ctx, w, h);
-
-      /* Clock */
-      this._drawClock(ctx, w, h);
+      /* Clock drawn outside clip (positioned relative to viewport) */
+      this._drawClock(ctx);
    }
 
-   /** Convert lat/lng (deg) to canvas pixel coordinates. */
-   _toCanvas(lng, lat, w, h) {
+   /** Convert lat/lng (deg) to canvas pixel coordinates within the map viewport. */
+   _toCanvas(lng, lat) {
       return {
-         x: (lng + 180) / 360 * w,
-         y: (90 - lat) / 180 * h,
+         x: this._mapX + (lng + 180) / 360 * this._mapW,
+         y: this._mapY + (90 - lat) / 180 * this._mapH,
       };
    }
 
    /** Day/night terminator (cf. DrawMap() day/night shader in 42gl.c).
     *  Semi-transparent dark overlay on the night side. */
-   _drawTerminator(ctx, w, h) {
+   _drawTerminator(ctx) {
       const sx = this._sunECEF[0];
       const sy = this._sunECEF[1];
       const sz = this._sunECEF[2];
+      const mx = this._mapX, my = this._mapY, mw = this._mapW, mh = this._mapH;
 
       /* Compute terminator curve: for each longitude, find latitude where sunDot=0 */
       ctx.beginPath();
@@ -824,7 +828,7 @@ class MapView {
             latDeg = Math.atan(-horiz / sz) * RAD2DEG;
          }
 
-         const p = this._toCanvas(lngDeg, latDeg, w, h);
+         const p = this._toCanvas(lngDeg, latDeg);
          if (!started) { ctx.moveTo(p.x, p.y); started = true; }
          else ctx.lineTo(p.x, p.y);
       }
@@ -834,12 +838,12 @@ class MapView {
          night side is below the terminator curve (toward south pole). */
       if (sz >= 0) {
          /* Night is below: extend to bottom-right → bottom-left */
-         ctx.lineTo(w, h);
-         ctx.lineTo(0, h);
+         ctx.lineTo(mx + mw, my + mh);
+         ctx.lineTo(mx, my + mh);
       } else {
          /* Night is above: extend to top-right → top-left */
-         ctx.lineTo(w, 0);
-         ctx.lineTo(0, 0);
+         ctx.lineTo(mx + mw, my);
+         ctx.lineTo(mx, my);
       }
       ctx.closePath();
       ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
@@ -847,42 +851,44 @@ class MapView {
    }
 
    /** Lat/lng grid (15° minor, 45° major — matching 42's DrawMap). */
-   _drawGrid(ctx, w, h) {
+   _drawGrid(ctx) {
+      const mx = this._mapX, my = this._mapY, mw = this._mapW, mh = this._mapH;
+
       /* Minor grid: 15° spacing */
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 0.5;
       for (let lat = -75; lat <= 75; lat += 15) {
-         const y = (90 - lat) / 180 * h;
-         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+         const y = my + (90 - lat) / 180 * mh;
+         ctx.beginPath(); ctx.moveTo(mx, y); ctx.lineTo(mx + mw, y); ctx.stroke();
       }
       for (let lng = -165; lng <= 165; lng += 15) {
-         const x = (lng + 180) / 360 * w;
-         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+         const x = mx + (lng + 180) / 360 * mw;
+         ctx.beginPath(); ctx.moveTo(x, my); ctx.lineTo(x, my + mh); ctx.stroke();
       }
 
       /* Major grid: 45° spacing */
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 1;
       for (let lat = -45; lat <= 45; lat += 45) {
-         const y = (90 - lat) / 180 * h;
-         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+         const y = my + (90 - lat) / 180 * mh;
+         ctx.beginPath(); ctx.moveTo(mx, y); ctx.lineTo(mx + mw, y); ctx.stroke();
       }
       for (let lng = -135; lng <= 135; lng += 45) {
-         const x = (lng + 180) / 360 * w;
-         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+         const x = mx + (lng + 180) / 360 * mw;
+         ctx.beginPath(); ctx.moveTo(x, my); ctx.lineTo(x, my + mh); ctx.stroke();
       }
 
       /* Equator and prime meridian */
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.lineWidth = 1;
-      const eqY = h / 2;
-      ctx.beginPath(); ctx.moveTo(0, eqY); ctx.lineTo(w, eqY); ctx.stroke();
-      const pmX = w / 2;
-      ctx.beginPath(); ctx.moveTo(pmX, 0); ctx.lineTo(pmX, h); ctx.stroke();
+      const eqY = my + mh / 2;
+      ctx.beginPath(); ctx.moveTo(mx, eqY); ctx.lineTo(mx + mw, eqY); ctx.stroke();
+      const pmX = mx + mw / 2;
+      ctx.beginPath(); ctx.moveTo(pmX, my); ctx.lineTo(pmX, my + mh); ctx.stroke();
    }
 
    /** Ground track (accumulated SC positions). */
-   _drawTrack(ctx, w, h) {
+   _drawTrack(ctx) {
       if (this._track.length < 2) return;
 
       ctx.strokeStyle = '#00ff88';
@@ -890,12 +896,12 @@ class MapView {
       ctx.beginPath();
 
       let prev = this._track[0];
-      let pp = this._toCanvas(prev.lng, prev.lat, w, h);
+      let pp = this._toCanvas(prev.lng, prev.lat);
       ctx.moveTo(pp.x, pp.y);
 
       for (let i = 1; i < this._track.length; i++) {
          const cur = this._track[i];
-         const cp = this._toCanvas(cur.lng, cur.lat, w, h);
+         const cp = this._toCanvas(cur.lng, cur.lat);
 
          /* Break line at ±180° wrap-around */
          if (Math.abs(cur.lng - prev.lng) > 180) {
@@ -911,10 +917,10 @@ class MapView {
    }
 
    /** Sub-satellite point marker (yellow circle + crosshair). */
-   _drawSCMarker(ctx, w, h) {
+   _drawSCMarker(ctx) {
       if (this._track.length === 0) return;
 
-      const p = this._toCanvas(this._scLng, this._scLat, w, h);
+      const p = this._toCanvas(this._scLng, this._scLat);
       const r = 5;
 
       /* Yellow filled circle */
@@ -931,14 +937,14 @@ class MapView {
       ctx.moveTo(p.x, p.y - r * 2); ctx.lineTo(p.x, p.y + r * 2);
       ctx.stroke();
 
-      /* Horizon circle (approximate as circle on Mercator — not geodesically correct) */
+      /* Horizon circle (approximate as ellipse on Mercator — not geodesically correct) */
       if (this._track.length > 0) {
          const posN = this.gl42._lastState?.posN;
          if (posN) {
             const r_m = Math.sqrt(posN[0] ** 2 + posN[1] ** 2 + posN[2] ** 2);
             const horizAngle = Math.acos(EARTH_RADIUS_KM * 1000 / r_m) * RAD2DEG;
-            const horizRadX = horizAngle / 360 * w;
-            const horizRadY = horizAngle / 180 * h;
+            const horizRadX = horizAngle / 360 * this._mapW;
+            const horizRadY = horizAngle / 180 * this._mapH;
 
             ctx.strokeStyle = 'rgba(250, 179, 135, 0.4)';
             ctx.lineWidth = 1;
@@ -950,11 +956,11 @@ class MapView {
    }
 
    /** Sub-solar point marker (gold star). */
-   _drawSunMarker(ctx, w, h) {
+   _drawSunMarker(ctx) {
       const sx = this._sunECEF[0], sy = this._sunECEF[1], sz = this._sunECEF[2];
       const sunLat = Math.asin(sz) * RAD2DEG;
       const sunLng = Math.atan2(sy, sx) * RAD2DEG;
-      const p = this._toCanvas(sunLng, sunLat, w, h);
+      const p = this._toCanvas(sunLng, sunLat);
 
       /* Gold circle */
       ctx.fillStyle = '#ffd700';
@@ -969,28 +975,29 @@ class MapView {
       ctx.fill();
    }
 
-   /** Clock overlay (top-right). */
-   _drawClock(ctx, w, h) {
+   /** Clock overlay (positioned relative to map viewport). */
+   _drawClock(ctx) {
+      const mx = this._mapX, my = this._mapY, mw = this._mapW, mh = this._mapH;
       const timeStr = `T+${fmtHMS(this._simTime)}`;
 
       ctx.font = '12px monospace';
       ctx.fillStyle = 'rgba(205, 214, 244, 0.8)';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'top';
-      ctx.fillText(timeStr, w - 8, 8);
+      ctx.fillText(timeStr, mx + mw - 8, my + 8);
 
       /* Lat/lng readout */
       if (this._track.length > 0) {
          const latStr = `${this._scLat >= 0 ? 'N' : 'S'}${Math.abs(this._scLat).toFixed(1)}`;
          const lngStr = `${this._scLng >= 0 ? 'E' : 'W'}${Math.abs(this._scLng).toFixed(1)}`;
-         ctx.fillText(`${latStr} ${lngStr}`, w - 8, 24);
+         ctx.fillText(`${latStr} ${lngStr}`, mx + mw - 8, my + 24);
       }
 
       /* Credits (bottom-left, matching 42's DrawCredits) */
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillStyle = 'rgba(127, 132, 156, 0.6)';
-      ctx.fillText('42 — Eric Stoneking, NASA GSFC', 8, h - 4);
+      ctx.fillText('42 — Eric Stoneking, NASA GSFC', mx + 8, my + mh - 4);
    }
 
    /* ------------------------------------------------------------------ */
@@ -1007,6 +1014,19 @@ class MapView {
       this.canvas.width = w * dpr;
       this.canvas.height = h * dpr;
       this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      /* Compute map viewport: fit 2:1 Mercator rectangle, centered */
+      const MAP_AR = 2; /* Mercator: width / height = 2 */
+      const containerAR = w / h;
+      if (containerAR > MAP_AR) {
+         this._mapH = h;
+         this._mapW = h * MAP_AR;
+      } else {
+         this._mapW = w;
+         this._mapH = w / MAP_AR;
+      }
+      this._mapX = (w - this._mapW) / 2;
+      this._mapY = (h - this._mapH) / 2;
 
       /* Redraw at new size */
       this._draw();

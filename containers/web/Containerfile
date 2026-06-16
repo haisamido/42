@@ -134,9 +134,10 @@ SHELL ["/bin/bash", "-c"]
 
 ENV PORT=8043
 ENV ROOT_DIR=/app
-ENV INOUT_DIR=/app/InOut
+ENV SESSION_DIR=/data/sessions
 ENV MODEL_DIR=/app/Model
 ENV WORLD_DIR=/app/World
+ENV SAMPLES_DIR=/app/samples
 ENV BIN_42=/app/42
 
 # Install Node.js 24
@@ -156,6 +157,16 @@ COPY --from=fortytwo-build-native /42/containers/web/server/server.js /app/serve
 
 # UI (shared with WASM variant)
 COPY --from=fortytwo-build-native /42/containers/web/ui /app/ui
+
+# Sample scenarios (pristine copies for scenario switching)
+COPY --from=fortytwo-build-native /42/InOut /app/samples/InOut
+COPY --from=fortytwo-build-native /42/Demo /app/samples/Demo
+COPY --from=fortytwo-build-native /42/Standalone /app/samples/Standalone
+COPY --from=fortytwo-build-native /42/Tx /app/samples/Tx
+COPY --from=fortytwo-build-native /42/LunarComm /app/samples/LunarComm
+COPY --from=fortytwo-build-native /42/Rx /app/samples/Rx
+
+RUN mkdir -p /data/sessions
 
 WORKDIR /app
 EXPOSE 8043

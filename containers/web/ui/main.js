@@ -188,6 +188,8 @@ function createWorker() {
                fileBrowser.setReady();
                /* Read stop time and dt */
                worker.postMessage({ type: 'GET_FILES', paths: ['/InOut/Inp_Sim.txt'] });
+               /* Populate sample selector */
+               worker.postMessage({ type: 'LIST_SAMPLES' });
                /* Auto-run if re-running from 'done' state */
                if (autoRunAfterReady) {
                   autoRunAfterReady = false;
@@ -270,6 +272,24 @@ function createWorker() {
             } else {
                consolePanel.appendLine(`[File] Save failed: ${msg.path} — ${msg.error}`, 'stderr');
             }
+            break;
+
+         case 'SAMPLES_LIST':
+            populateSampleSelector(msg.samples || []);
+            break;
+
+         case 'SAMPLE_LOADED':
+            if (msg.success) {
+               consolePanel.appendLine(`[42-web] Sample loaded: ${msg.name}`, 'info');
+               /* Re-read config and refresh file browser */
+               worker.postMessage({ type: 'GET_FILES', paths: ['/InOut/Inp_Sim.txt'] });
+               fileBrowser.setReady();
+               gl42.clearTrails();
+               statePanel.update(null, 0);
+            } else {
+               consolePanel.appendLine(`[42-web] Sample load failed: ${msg.error}`, 'stderr');
+            }
+            if (sampleSelector) sampleSelector.disabled = false;
             break;
       }
    };
@@ -421,10 +441,16 @@ controlPanel.onRun = () => {
 initResizeHandles();
 
 /* ------------------------------------------------------------------ */
-/* Sample loading dialog                                               */
+/* Sample scenario selector                                            */
 /* ------------------------------------------------------------------ */
-document.getElementById('btn-load-sample')
-   ?.addEventListener('click', () => showSamplesDialog());
+const sampleSelector = document.getElementById('sample-selector');
+sampleSelector?.addEventListener('change', () => {
+   const name = sampleSelector.value;
+   if (!name || !worker) return;
+   consolePanel.appendLine(`[42-web] Loading sample: ${name}...`, 'info');
+   sampleSelector.disabled = true;
+   worker.postMessage({ type: 'LOAD_SAMPLE', name });
+});
 
 /* ------------------------------------------------------------------ */
 /* Flush outputs to server                                             */
@@ -580,77 +606,22 @@ function initResizeHandles() {
 }
 
 /* ================================================================== */
-/* Helper: Samples dialog                                              */
+/* Helper: Sample scenario selector                                    */
 /* ================================================================== */
 
-function showSamplesDialog() {
-   const overlay = document.getElementById('dialog-overlay');
-   const dialogEl = document.getElementById('dialog-content');
-   if (!overlay || !dialogEl) return;
-
-   dialogEl.innerHTML = `
-      <h2>Load Sample Configuration</h2>
-      <p style="color:var(--subtext0);margin-bottom:12px;">
-         Select an input file to open in the editor.
-      </p>
-      <div id="sample-list" style="max-height:300px;overflow-y:auto;">
-         <div style="color:var(--subtext0);padding:12px;">Loading file list...</div>
-      </div>
-      <div style="margin-top:16px;text-align:right;">
-         <button class="tb-btn" id="dialog-close-btn">Close</button>
-      </div>
-   `;
-
-   overlay.classList.add('visible');
-
-   document.getElementById('dialog-close-btn')
-      .addEventListener('click', () => {
-         overlay.classList.remove('visible');
-      });
-
-   overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-         overlay.classList.remove('visible');
-      }
-   });
-
-   /* Request listing of /InOut to populate samples */
-   if (worker) {
-      const handler = (e) => {
-         const msg = e.data;
-         if (msg.type === 'DIR_LIST' && msg.path === '/InOut') {
-            worker.removeEventListener('message', handler);
-            populateSampleList(msg.entries);
-         }
-      };
-      worker.addEventListener('message', handler);
-      worker.postMessage({ type: 'LIST_DIR', path: '/InOut' });
+function populateSampleSelector(samples) {
+   if (!sampleSelector) return;
+   /* Preserve current selection */
+   const current = sampleSelector.value;
+   /* Clear existing options beyond the placeholder */
+   sampleSelector.innerHTML = '<option value="">— Scenario —</option>';
+   for (const s of samples) {
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      opt.textContent = s.name;
+      sampleSelector.appendChild(opt);
    }
-}
-
-function populateSampleList(entries) {
-   const listEl = document.getElementById('sample-list');
-   if (!listEl) return;
-
-   const files = entries.filter(e => !e.isDir && /\.(txt|inp)$/i.test(e.name));
-
-   if (files.length === 0) {
-      listEl.innerHTML = '<div style="color:var(--subtext0);padding:12px;">No input files found. Click Init first.</div>';
-      return;
-   }
-
-   listEl.innerHTML = '';
-   for (const file of files) {
-      const item = document.createElement('div');
-      item.className = 'example-item';
-      item.innerHTML = `
-         <div class="example-title">\u{1F4C4} ${file.name}</div>
-         <div class="example-desc">/InOut/${file.name}</div>
-      `;
-      item.addEventListener('click', () => {
-         document.getElementById('dialog-overlay').classList.remove('visible');
-         openFileTab('/InOut/' + file.name);
-      });
-      listEl.appendChild(item);
-   }
+   /* Restore selection if it still exists */
+   if (current) sampleSelector.value = current;
+   sampleSelector.disabled = false;
 }
