@@ -2,10 +2,26 @@
 /*    These functions exist in 42's codebase but have no meaning in      */
 /*    a WebAssembly environment. They are stubbed to satisfy the linker. */
 
+/* Undo the -include fopen macro so this file can call the real fopen */
+#undef fopen
+
 #include "42.h"
 #include <time.h>
 #include <sys/time.h>
 #include <emscripten/emscripten.h>
+
+/**********************************************************************/
+/* fopen — unbuffered wrapper redirected via 42wasm_unbuf.h macro.    */
+/* Every fopen() call in the build becomes _42w_fopen_unbuf(), which  */
+/* sets _IONBF so fprintf writes go directly to MEMFS.                */
+/* See: https://github.com/emscripten-core/emscripten/issues/7360    */
+FILE *_42w_fopen_unbuf(const char *path, const char *mode)
+{
+   FILE *f = fopen(path, mode);
+   if (f)
+      setvbuf(f, NULL, _IONBF, 0);
+   return f;
+}
 
 /**********************************************************************/
 /* nanosleep — called by AdvanceTime() in REAL_TIME mode only.        */

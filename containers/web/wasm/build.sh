@@ -106,6 +106,7 @@ echo "Compiling ${#ALL_SOURCES[@]} source files..."
 # ---------------------------------------------------------------------------
 
 emcc "${ALL_SOURCES[@]}" \
+    -include "${SHIMS}/42wasm_unbuf.h" \
     -I "${INC}" \
     -I "${KITINC}" \
     -I "${KIT}" \
