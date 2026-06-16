@@ -5,9 +5,7 @@
  * file browser, file editors, resize handles, dialogs, and all panels.
  */
 
-import { SceneManager } from './viewer/SceneManager.js';
-import { OrbitTrail } from './viewer/OrbitTrail.js';
-import { SpacecraftView } from './viewer/SpacecraftView.js';
+import { FortyTwoGL, CAM_MODE } from './viewer/42gl.js';
 import { TabManager } from './widgets/TabManager.js';
 import { ControlPanel } from './panels/ControlPanel.js';
 import { StatePanel } from './panels/StatePanel.js';
@@ -16,6 +14,7 @@ import { FileBrowser } from './panels/FileBrowser.js';
 import { FileEditor } from './panels/FileEditor.js';
 import { ServerSync } from './core/ServerSync.js';
 import { ServerBackend } from './core/ServerBackend.js';
+import { normalizeState } from './core/StateNormalizer.js';
 
 /* ------------------------------------------------------------------ */
 /* Backend mode: 'wasm' (client-side) or 'server' (native)            */
@@ -60,21 +59,28 @@ if (BACKEND_MODE === 'wasm' && 'serviceWorker' in navigator) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Three.js Viewer (permanent "3D View" tab)                           */
+/* 42gl Rendering Engine                                               */
 /* ------------------------------------------------------------------ */
+const gl42 = new FortyTwoGL({
+   textureBase: '/api/files/raw/World',
+   modelBase:   '/api/files/raw/Model',
+});
+
+/* 3D View container */
 const viewerEl = document.createElement('div');
 viewerEl.id = 'viewer-container';
 viewerEl.style.cssText = 'width:100%;height:100%;flex:1;';
+gl42.createCamView(viewerEl, {
+   earthTexture: 'BlueMarble2.ppm',
+});
 
-const scene = new SceneManager(viewerEl);
-const earthVS = document.getElementById('earthVertexShader')?.textContent;
-const earthFS = document.getElementById('earthFragmentShader')?.textContent;
-const atmosVS = document.getElementById('atmosVertexShader')?.textContent;
-const atmosFS = document.getElementById('atmosFragmentShader')?.textContent;
-scene.init(earthVS, earthFS, atmosVS, atmosFS);
-
-const trail = new OrbitTrail(scene.scene, { color: 0x00ff88 });
-const scView = new SpacecraftView(scene.scene, (posN) => scene.nFrameToThreeJS(posN));
+/* 2D Map View container */
+const mapEl = document.createElement('div');
+mapEl.id = 'map-container';
+mapEl.style.cssText = 'width:100%;height:100%;flex:1;background:#0a1628;';
+gl42.createMapView(mapEl, {
+   mapTexture: 'BlueMarble2.ppm',
+});
 
 /* ------------------------------------------------------------------ */
 /* Tab Manager (main content area)                                     */
@@ -84,11 +90,9 @@ const tabManager = new TabManager(
    document.getElementById('tab-content'),
 );
 
-/* Add the 3D View as permanent (non-closeable) first tab */
+/* Add the 3D View and Map View as permanent (non-closeable) tabs */
 tabManager.addTab('3d-view', '3D View', viewerEl, false, {}, '\u{1F30D}');
-
-/* When switching back to 3D tab, the ResizeObserver auto-detects
-   container dimension changes, so no explicit resize call is needed. */
+tabManager.addTab('map-view', 'Map', mapEl, false, {}, '\u{1F5FA}');
 
 /* ------------------------------------------------------------------ */
 /* Console Panel (bottom panel)                                        */
@@ -202,18 +206,14 @@ function createWorker() {
             }
             break;
 
-         case 'STATE':
-            statePanel.update(msg.state, stopTime);
-            simConfigPanel.updateFromState(msg.state, stopTime);
-            if (msg.state) {
-               const pos = scene.nFrameToThreeJS(msg.state.posN);
-               trail.addPoint(pos);
-               scView.update(msg.state.posN, msg.state.qbn);
-               if (msg.state.svn) {
-                  scene.updateSunDirection(msg.state.svn);
-               }
-            }
+         case 'STATE': {
+            const st = normalizeState(msg.state);
+            if (!st) break;
+            statePanel.update(st, stopTime);
+            simConfigPanel.updateFromState(st, stopTime);
+            gl42.update(st);
             break;
+         }
 
          case 'STDOUT':
             consolePanel.appendLine(msg.text, 'stdout');
@@ -382,8 +382,7 @@ function parseSimConfig(text) {
 /* ------------------------------------------------------------------ */
 
 function resetSimulation() {
-   trail.clear();
-   scView.setVisible(false);
+   gl42.clearTrails();
    statePanel.update(null, 0);
    stopTime = 10000;
    createWorker();
@@ -401,15 +400,13 @@ controlPanel.onRun = () => {
       if (BACKEND_MODE === 'wasm') {
          /* WASM: re-init in-place (reuses compiled module + MEMFS) */
          consolePanel.appendLine('[42-web] Re-initializing for new run...', 'info');
-         trail.clear();
-         scView.setVisible(false);
+         gl42.clearTrails();
          statePanel.update(null, 0);
          autoRunAfterReady = true;
          worker.postMessage({ type: 'REINIT' });
       } else {
          /* Server: just start again (server kills old process) */
-         trail.clear();
-         scView.setVisible(false);
+         gl42.clearTrails();
          statePanel.update(null, 0);
          worker.postMessage({ type: 'RUN', stepsPerBatch: controlPanel._stepsPerBatch });
       }

@@ -3,6 +3,7 @@
 /*    Port 8043 by default.                                                */
 
 const http = require('http');
+const net  = require('net');
 const fs   = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -11,7 +12,9 @@ const PORT       = parseInt(process.env.PORT || '8043', 10);
 const ROOT_DIR   = process.env.ROOT_DIR   || path.join(__dirname);
 const INOUT_DIR  = process.env.INOUT_DIR  || path.join(ROOT_DIR, 'InOut');
 const MODEL_DIR  = process.env.MODEL_DIR  || path.join(ROOT_DIR, 'Model');
+const WORLD_DIR  = process.env.WORLD_DIR  || path.join(ROOT_DIR, 'World');
 const BIN_42     = process.env.BIN_42     || path.join(ROOT_DIR, '42');
+const OVERRIDE_DIR = process.env.OVERRIDE_DIR || path.join(ROOT_DIR, 'overrides');
 
 /* Read git commit from build artifact */
 let GIT_COMMIT = 'unknown';
@@ -31,6 +34,10 @@ const MIME = {
    '.ico':   'image/x-icon',
    '.txt':   'text/plain; charset=utf-8',
    '.csv':   'text/csv; charset=utf-8',
+   '.ppm':   'image/x-portable-pixmap',
+   '.pgm':   'image/x-portable-graymap',
+   '.obj':   'text/plain; charset=utf-8',
+   '.mtl':   'text/plain; charset=utf-8',
 };
 
 function getMime(filePath) {
@@ -54,7 +61,7 @@ function logReq(req, status, size) {
 const MAX_SINGLE = 10 * 1024 * 1024;
 
 /** Allowed top-level directories under ROOT_DIR for the file API. */
-const ALLOWED_ROOTS = ['InOut', 'Model'];
+const ALLOWED_ROOTS = ['InOut', 'Model', 'World'];
 
 /** Resolve a relative path safely within baseDir. Returns null if invalid. */
 function safePath(relPath, baseDir) {
@@ -100,10 +107,13 @@ function sendJSON(res, status, obj) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 42 Process Manager                                                  */
+/* 42 Process Manager + IPC                                            */
 /* ------------------------------------------------------------------ */
 
-let sim = null;  /* { proc, status, startTime } */
+const IPC_PORT = parseInt(process.env.IPC_PORT || '10001', 10);
+const BROADCAST_INTERVAL_MS = 33; /* ~30fps max for SSE state push */
+
+let sim = null;    /* { proc, status, startTime, ipcClient } */
 const sseClients = new Set();
 
 function broadcastSSE(event, data) {
@@ -113,6 +123,216 @@ function broadcastSSE(event, data) {
    }
 }
 
+/* ------------------------------------------------------------------ */
+/* IPC Configuration Writer                                            */
+/* ------------------------------------------------------------------ */
+
+/** Write Inp_IPC.txt to INOUT_DIR before spawning 42.
+ *  Configures 42 as a TCP SERVER in TX mode on IPC_PORT. */
+function writeIpcConfig() {
+   const content = [
+      '<<<<<<<<<<<<<<< 42: InterProcess Comm Configuration File >>>>>>>>>>>>>>>>',
+      `1                                       ! Number of Sockets`,
+      '**********************************  IPC 0   *****************************',
+      'TX                                      ! IPC Mode (OFF,TX,RX,TXRX,WRITEFILE,READFILE)',
+      '"State00.42"                            ! File name for WRITE or READ',
+      'SERVER                                  ! Socket Role (SERVER,CLIENT,GMSEC_CLIENT)',
+      `localhost     ${IPC_PORT}               ! Server Host Name, Port`,
+      'TRUE                                    ! Allow Blocking (i.e. wait on RX)',
+      'FALSE                                   ! Echo to stdout',
+      '2                                       ! Number of TX prefixes',
+      '"SC"                                    ! Prefix 0',
+      '"Orb"                                   ! Prefix 1',
+   ].join('\n') + '\n';
+
+   fs.writeFileSync(path.join(INOUT_DIR, 'Inp_IPC.txt'), content);
+   console.log(`${timestamp()} Wrote Inp_IPC.txt (TX SERVER on port ${IPC_PORT})`);
+}
+
+/* ------------------------------------------------------------------ */
+/* IPC Message Parser                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Parse a single 42 IPC text message into a state object.
+ *  Message format: lines of "VARIABLE = [values]" ending with [ENDMSG] */
+function parseIpcMessage(msg) {
+   const state = {
+      simTime: 0,
+      posN: null,
+      velN: null,
+      qbn: null,
+      svb: null,
+      svn: null,
+      posR: null,
+      velR: null,
+      wn: null,
+   };
+
+   for (const line of msg.split('\n')) {
+      const s = line.trim();
+      if (!s || s === '[ENDMSG]') continue;
+
+      /* TIME YYYY-DDD-HH:MM:SS.SSSSSSSSS */
+      if (s.startsWith('TIME ')) {
+         /* Convert day-of-year timestamp to seconds since epoch start.
+            For the UI we just need simTime from the sim's time.42 equivalent. */
+         const parts = s.slice(5).match(/^(\d+)-(\d+)-(\d+):(\d+):([\d.]+)$/);
+         if (parts) {
+            const doy = parseInt(parts[2]);
+            const hr  = parseInt(parts[3]);
+            const min = parseInt(parts[4]);
+            const sec = parseFloat(parts[5]);
+            /* Approximate: total seconds from start of year */
+            state.simTime = (doy - 1) * 86400 + hr * 3600 + min * 60 + sec;
+         }
+         continue;
+      }
+
+      /* Parse bracketed vector values: "VAR = [v0 v1 v2 ...]" */
+      const eqIdx = s.indexOf('=');
+      if (eqIdx === -1) continue;
+      const varName = s.slice(0, eqIdx).trim();
+      const brk = s.indexOf('[', eqIdx);
+      if (brk === -1) continue;
+      const end = s.indexOf(']', brk);
+      if (end === -1) continue;
+      const vals = s.slice(brk + 1, end).trim().split(/\s+/).map(Number);
+      if (!vals.every(isFinite)) continue;
+
+      /* Match known variables (SC[0] only for now) */
+      if (varName === 'SC[0].qn' && vals.length >= 4) state.qbn = vals.slice(0, 4);
+      else if (varName === 'SC[0].wn' && vals.length >= 3) state.wn = vals.slice(0, 3);
+      else if (varName === 'SC[0].PosR' && vals.length >= 3) state.posR = vals.slice(0, 3);
+      else if (varName === 'SC[0].VelR' && vals.length >= 3) state.velR = vals.slice(0, 3);
+      else if (varName === 'SC[0].svb' && vals.length >= 3) state.svb = vals.slice(0, 3);
+      else if (varName === 'Orb[0].PosN' && vals.length >= 3) state.posN = vals.slice(0, 3);
+      else if (varName === 'Orb[0].VelN' && vals.length >= 3) state.velN = vals.slice(0, 3);
+   }
+
+   /* Compute svn from svb and qbn: svn = q_conj * svb * q (quaternion rotation) */
+   if (state.svb && state.qbn) {
+      state.svn = quatRotate(quatConjugate(state.qbn), state.svb);
+   }
+
+   return state;
+}
+
+/** Quaternion conjugate: q = [q0, q1, q2, q3] (scalar-first) */
+function quatConjugate(q) {
+   return [q[0], -q[1], -q[2], -q[3]];
+}
+
+/** Rotate vector v by quaternion q (scalar-first convention).
+ *  result = q * [0,v] * q_conj */
+function quatRotate(q, v) {
+   const [q0, q1, q2, q3] = q;
+   const [vx, vy, vz] = v;
+   /* Hamilton product: p = q * [0, vx, vy, vz] */
+   const pw = -q1 * vx - q2 * vy - q3 * vz;
+   const px =  q0 * vx + q2 * vz - q3 * vy;
+   const py =  q0 * vy + q3 * vx - q1 * vz;
+   const pz =  q0 * vz + q1 * vy - q2 * vx;
+   /* Hamilton product: result = p * q_conj */
+   return [
+      pw * (-q1) + px * q0 + py * (-q3) - pz * (-q2),
+      pw * (-q2) + py * q0 + pz * (-q1) - px * (-q3),
+      pw * (-q3) + pz * q0 + px * (-q2) - py * (-q1),
+   ];
+}
+
+/* ------------------------------------------------------------------ */
+/* IPC Stream Processor                                                */
+/* ------------------------------------------------------------------ */
+
+let ipcBuffer = '';
+let trailBuffer = [];
+let lastBroadcastTime = 0;
+let ipcSimTimeOffset = 0;   /* offset to convert DOY-based time to sim elapsed time */
+let ipcFirstTime = true;
+
+function processIpcData(chunk) {
+   ipcBuffer += chunk.toString('utf8');
+
+   let endIdx;
+   while ((endIdx = ipcBuffer.indexOf('[ENDMSG]\n')) !== -1) {
+      const msgText = ipcBuffer.slice(0, endIdx + '[ENDMSG]\n'.length);
+      ipcBuffer = ipcBuffer.slice(endIdx + '[ENDMSG]\n'.length);
+
+      /* Send Ack immediately to unblock 42 */
+      if (sim && sim.ipcClient && !sim.ipcClient.destroyed) {
+         sim.ipcClient.write('Ack\0');
+      }
+
+      /* Parse the message */
+      const state = parseIpcMessage(msgText);
+      if (!state.posN) continue; /* Skip incomplete messages */
+
+      /* On first message, record time offset so simTime starts near 0 */
+      if (ipcFirstTime) {
+         ipcSimTimeOffset = state.simTime;
+         ipcFirstTime = false;
+      }
+      state.simTime -= ipcSimTimeOffset;
+
+      /* Accumulate trail points from every message */
+      trailBuffer.push(state.posN);
+
+      /* Broadcast to browser at capped rate */
+      const now = Date.now();
+      if (now - lastBroadcastTime >= BROADCAST_INTERVAL_MS) {
+         const stop = getStopTime();
+         state.done = state.simTime >= stop;
+         state.trailPoints = trailBuffer;
+         trailBuffer = [];
+         broadcastSSE('state', state);
+         lastBroadcastTime = now;
+      }
+   }
+}
+
+/* ------------------------------------------------------------------ */
+/* IPC Connection Manager                                              */
+/* ------------------------------------------------------------------ */
+
+function connectIpc() {
+   return new Promise((resolve, reject) => {
+      const client = new net.Socket();
+      const timeout = setTimeout(() => {
+         client.destroy();
+         reject(new Error('IPC connection timeout'));
+      }, 15000);
+
+      client.connect(IPC_PORT, '127.0.0.1', () => {
+         clearTimeout(timeout);
+         console.log(`${timestamp()} IPC connected to 42 on port ${IPC_PORT}`);
+         resolve(client);
+      });
+
+      client.on('error', (err) => {
+         clearTimeout(timeout);
+         reject(err);
+      });
+   });
+}
+
+/** Retry IPC connection with delay (42 needs time to start listening). */
+async function connectIpcWithRetry(maxRetries, delayMs) {
+   for (let i = 0; i < maxRetries; i++) {
+      try {
+         return await connectIpc();
+      } catch (e) {
+         if (i < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, delayMs));
+         }
+      }
+   }
+   throw new Error(`Failed to connect to IPC after ${maxRetries} retries`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Simulation Lifecycle                                                */
+/* ------------------------------------------------------------------ */
+
 function startSim() {
    if (sim && sim.proc && sim.status === 'running') {
       return { success: false, error: 'Simulation already running' };
@@ -121,13 +341,22 @@ function startSim() {
    /* Re-read stopTime in case user edited Inp_Sim.txt between runs */
    cachedStopTime = null;
 
+   /* Reset IPC state */
+   ipcBuffer = '';
+   trailBuffer = [];
+   lastBroadcastTime = 0;
+   ipcFirstTime = true;
+
+   /* Write IPC config so 42 starts a TCP server */
+   writeIpcConfig();
+
    const proc = spawn(BIN_42, [INOUT_DIR + '/'], {
       cwd: ROOT_DIR,
       env: { ...process.env, DISPLAY: '' },
       stdio: ['ignore', 'pipe', 'pipe'],
    });
 
-   sim = { proc, status: 'running', startTime: timestamp(), pid: proc.pid };
+   sim = { proc, status: 'running', startTime: timestamp(), pid: proc.pid, ipcClient: null };
    console.log(`${timestamp()} 42 started (pid ${proc.pid})`);
    broadcastSSE('status', { status: 'running', pid: proc.pid });
 
@@ -143,8 +372,20 @@ function startSim() {
 
    proc.on('close', (code) => {
       console.log(`${timestamp()} 42 exited (code ${code})`);
+      if (sim.ipcClient) {
+         sim.ipcClient.destroy();
+         sim.ipcClient = null;
+      }
       sim.status = 'done';
       sim.exitCode = code;
+
+      /* Flush remaining trail points */
+      if (trailBuffer.length > 0) {
+         broadcastSSE('state', { simTime: getStopTime(), done: true, trailPoints: trailBuffer,
+            posN: trailBuffer[trailBuffer.length - 1], velN: [0,0,0], qbn: [1,0,0,0], svn: [1,0,0] });
+         trailBuffer = [];
+      }
+
       broadcastSSE('status', { status: 'done', exitCode: code });
    });
 
@@ -155,12 +396,43 @@ function startSim() {
       broadcastSSE('status', { status: 'error', error: err.message });
    });
 
+   /* Connect to 42's IPC socket after a brief delay for 42 to init */
+   connectIpcWithRetry(30, 500).then((client) => {
+      sim.ipcClient = client;
+
+      client.on('data', (chunk) => {
+         processIpcData(chunk);
+      });
+
+      client.on('close', () => {
+         console.log(`${timestamp()} IPC socket closed`);
+         sim.ipcClient = null;
+      });
+
+      client.on('error', (err) => {
+         console.error(`${timestamp()} IPC socket error: ${err.message}`);
+      });
+   }).catch((err) => {
+      console.error(`${timestamp()} IPC connection failed: ${err.message}`);
+      console.log(`${timestamp()} Falling back to file-based state polling`);
+      /* Fall back to file polling if IPC fails */
+      startFilePoller();
+   });
+
    return { success: true, pid: proc.pid };
 }
 
 function stopSim() {
    if (!sim || !sim.proc || sim.status !== 'running') {
       return { success: false, error: 'No simulation running' };
+   }
+   if (sim.ipcClient) {
+      sim.ipcClient.destroy();
+      sim.ipcClient = null;
+   }
+   if (sim.filePoller) {
+      clearInterval(sim.filePoller);
+      sim.filePoller = null;
    }
    sim.proc.kill('SIGTERM');
    sim.status = 'stopping';
@@ -176,12 +448,31 @@ function getSimStatus() {
       startTime: sim.startTime,
       exitCode: sim.exitCode,
       error: sim.error,
+      ipc: sim.ipcClient ? 'connected' : 'disconnected',
    };
 }
 
-/** Read the last non-empty line of a file by reading only the tail.
- *  Reads at most `tailBytes` from the end of the file instead of the
- *  entire contents, keeping I/O constant regardless of file size. */
+/* ------------------------------------------------------------------ */
+/* File-based fallback (used when IPC connection fails)                */
+/* ------------------------------------------------------------------ */
+
+let posNOffset = 0;
+
+function startFilePoller() {
+   if (!sim) return;
+   /* Reset offset */
+   try {
+      const stat = fs.statSync(path.join(INOUT_DIR, 'PosN.42'));
+      posNOffset = stat.size;
+   } catch (e) {
+      posNOffset = 0;
+   }
+   sim.filePoller = setInterval(() => {
+      const state = getSimStateFromFiles();
+      if (state) broadcastSSE('state', state);
+   }, 500);
+}
+
 const TAIL_BYTES = 512;
 
 function readLastLine(filePath) {
@@ -190,7 +481,6 @@ function readLastLine(filePath) {
       fd = fs.openSync(filePath, 'r');
       const stat = fs.fstatSync(fd);
       if (stat.size === 0) return null;
-
       const readSize = Math.min(TAIL_BYTES, stat.size);
       const buf = Buffer.alloc(readSize);
       fs.readSync(fd, buf, 0, readSize, stat.size - readSize);
@@ -222,35 +512,52 @@ function getStopTime() {
    return Infinity;
 }
 
-/** Read current simulation state from 42's output files. */
-function getSimState() {
+function readNewPosLines() {
+   const filePath = path.join(INOUT_DIR, 'PosN.42');
+   let fd;
+   try {
+      fd = fs.openSync(filePath, 'r');
+      const stat = fs.fstatSync(fd);
+      if (stat.size <= posNOffset) {
+         if (stat.size < posNOffset) posNOffset = 0;
+         return [];
+      }
+      const readSize = stat.size - posNOffset;
+      const buf = Buffer.alloc(readSize);
+      fs.readSync(fd, buf, 0, readSize, posNOffset);
+      const text = buf.toString('utf8');
+      const nlIdx = text.lastIndexOf('\n');
+      if (nlIdx === -1) return [];
+      const consumed = nlIdx + 1;
+      posNOffset += consumed;
+      return text.slice(0, consumed).split('\n')
+         .filter(l => l.trim())
+         .map(line => line.trim().split(/\s+/).map(Number).slice(0, 3))
+         .filter(p => p.length === 3 && p.every(isFinite));
+   } catch (e) {
+      return [];
+   } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+   }
+}
+
+function getSimStateFromFiles() {
    const timeLine = readLastLine(path.join(INOUT_DIR, 'time.42'));
    if (!timeLine) return null;
-
    const rawTime = parseFloat(timeLine);
    const stop = getStopTime();
    const simTime = (rawTime > stop) ? stop : rawTime;
-
    const parseLine = (file, count) => {
       const line = readLastLine(path.join(INOUT_DIR, file));
       if (!line) return new Array(count).fill(0);
-      const vals = line.trim().split(/\s+/).map(Number);
-      return vals.slice(0, count);
+      return line.trim().split(/\s+/).map(Number).slice(0, count);
    };
-
    const posN = parseLine('PosN.42', 3);
    const velN = parseLine('VelN.42', 3);
    const qbn  = parseLine('qbn.42', 4);
    const svn  = parseLine('svn.42', 3);
-
-   return {
-      simTime,
-      posN,
-      velN,
-      qbn,
-      svn,
-      done: rawTime > stop,
-   };
+   const trailPoints = readNewPosLines();
+   return { simTime, posN, velN, qbn, svn, done: rawTime > stop, trailPoints };
 }
 
 /* ------------------------------------------------------------------ */
@@ -317,9 +624,9 @@ const server = http.createServer(async (req, res) => {
          return;
       }
 
-      /* GET /api/sim/state — current state from output files */
+      /* GET /api/sim/state — current state from output files (fallback) */
       if (urlPath === '/api/sim/state' && req.method === 'GET') {
-         const state = getSimState();
+         const state = getSimStateFromFiles();
          if (state) {
             const size = sendJSON(res, 200, state);
             logReq(req, 200, size);
@@ -461,6 +768,37 @@ const server = http.createServer(async (req, res) => {
          return;
       }
 
+      /* GET /api/files/raw/<relative-path> — serve file as binary stream */
+      if (urlPath.startsWith('/api/files/raw/') && req.method === 'GET') {
+         const relPath = urlPath.slice('/api/files/raw/'.length);
+         const filePath = safeDataPath(relPath);
+         if (!filePath) {
+            const size = sendJSON(res, 400, { error: 'Invalid path' });
+            logReq(req, 400, size);
+            return;
+         }
+         try {
+            const stat = fs.statSync(filePath);
+            if (!stat.isFile()) {
+               const size = sendJSON(res, 404, { error: 'Not a file' });
+               logReq(req, 404, size);
+               return;
+            }
+            const mime = getMime(filePath);
+            res.writeHead(200, {
+               'Content-Type': mime,
+               'Content-Length': stat.size,
+               'Cache-Control': 'public, max-age=3600',
+            });
+            fs.createReadStream(filePath).pipe(res);
+            logReq(req, 200, stat.size);
+         } catch (e) {
+            const size = sendJSON(res, 404, { error: 'File not found' });
+            logReq(req, 404, size);
+         }
+         return;
+      }
+
       const size = sendJSON(res, 404, { error: 'Unknown file endpoint' });
       logReq(req, 404, size);
       return;
@@ -535,10 +873,54 @@ const server = http.createServer(async (req, res) => {
    });
 });
 
+/* ------------------------------------------------------------------ */
+/* Runtime override merge                                              */
+/* Copies files from OVERRIDE_DIR/{InOut,Model,World} over the         */
+/* corresponding bind-mounted directories. Override files win.         */
+/* ------------------------------------------------------------------ */
+
+function mergeOverrides() {
+   const pairs = [
+      { src: path.join(OVERRIDE_DIR, 'InOut'),  dst: INOUT_DIR },
+      { src: path.join(OVERRIDE_DIR, 'Model'),  dst: MODEL_DIR },
+      { src: path.join(OVERRIDE_DIR, 'World'),  dst: WORLD_DIR },
+   ];
+   for (const { src, dst } of pairs) {
+      if (!fs.existsSync(src)) continue;
+      copyDirRecursive(src, dst);
+   }
+}
+
+function copyDirRecursive(src, dst) {
+   let entries;
+   try { entries = fs.readdirSync(src, { withFileTypes: true }); }
+   catch (e) { return; }
+   for (const entry of entries) {
+      if (entry.name === '.gitkeep') continue;
+      const srcPath = path.join(src, entry.name);
+      const dstPath = path.join(dst, entry.name);
+      if (entry.isDirectory()) {
+         fs.mkdirSync(dstPath, { recursive: true });
+         copyDirRecursive(srcPath, dstPath);
+      } else {
+         try {
+            fs.copyFileSync(srcPath, dstPath);
+            console.log(`${timestamp()} Override: ${srcPath} -> ${dstPath}`);
+         } catch (e) {
+            console.error(`${timestamp()} Override failed: ${srcPath} -> ${dstPath}: ${e.message}`);
+         }
+      }
+   }
+}
+
+mergeOverrides();
+
 server.listen(PORT, () => {
    console.log(`${timestamp()} 42-web server listening on http://0.0.0.0:${PORT}`);
    console.log(`${timestamp()} Serving: ${ROOT_DIR}`);
    console.log(`${timestamp()} InOut: ${INOUT_DIR}`);
+   console.log(`${timestamp()} Model: ${MODEL_DIR}`);
+   console.log(`${timestamp()} World: ${WORLD_DIR}`);
    console.log(`${timestamp()} 42 binary: ${BIN_42}`);
    console.log(`${timestamp()} Git commit: ${GIT_COMMIT}`);
 });

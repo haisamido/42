@@ -6,6 +6,9 @@
 #   task server:build && task server:up     # Native on :8043
 #   task build                              # build both
 #   task up                                 # start both
+#   task wasm:rebuild                       # full rebuild WASM (no cache)
+#   task server:rebuild                     # full rebuild server (no cache)
+#   task rebuild                            # full rebuild both (no cache)
 #
 # Requires: https://taskfile.dev
 
@@ -50,9 +53,11 @@ tasks:
       - docker compose -f {{.COMPOSE_FILE}} build 42-web-wasm
 
   wasm:rebuild:
-    desc: Build 42-web-wasm from scratch (no cache)
+    desc: Stop, rebuild (no cache), and start 42-web-wasm
     cmds:
+      - task: wasm:down
       - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web-wasm
+      - task: wasm:up
 
   wasm:up:
     desc: Start 42-web-wasm container
@@ -90,9 +95,11 @@ tasks:
       - docker compose -f {{.COMPOSE_FILE}} build 42-web-server
 
   server:rebuild:
-    desc: Build 42-web-server from scratch (no cache)
+    desc: Stop, rebuild (no cache), and start 42-web-server
     cmds:
+      - task: server:down
       - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web-server
+      - task: server:up
 
   server:up:
     desc: Start 42-web-server container
@@ -119,6 +126,17 @@ tasks:
     cmds:
       - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web-server
       - docker rmi $(docker images -q '*/42-web-server' 2>/dev/null) 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Convenience: down + build + up in one step
+  # ---------------------------------------------------------------------------
+
+  rebuild:
+    desc: Stop, rebuild (no cache), and start all services
+    cmds:
+      - task: down
+      - docker compose -f {{.COMPOSE_FILE}} build --no-cache
+      - task: up
 
   # ---------------------------------------------------------------------------
   # Info

@@ -82,72 +82,7 @@
       <div class="dialog" id="dialog-content"></div>
    </div>
 
-   <!-- Earth shaders (embedded) -->
-   <script id="earthVertexShader" type="x-shader/x-vertex">
-      varying vec2 vUv;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-
-      void main() {
-         vUv = uv;
-         vNormal = normalize(normalMatrix * normal);
-         vPosition = (modelViewMatrix * vec4(position, 1.0)).xyz;
-         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-   </script>
-
-   <script id="earthFragmentShader" type="x-shader/x-fragment">
-      uniform sampler2D uDayTexture;
-      uniform vec3 uSunDirection;
-
-      varying vec2 vUv;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-
-      void main() {
-         vec3 normal = normalize(vNormal);
-         float sunDot = dot(normal, normalize(uSunDirection));
-         float dayFactor = smoothstep(-0.1, 0.2, sunDot);
-
-         vec4 dayColor = texture2D(uDayTexture, vUv);
-         vec3 nightColor = vec3(0.02, 0.02, 0.05);
-
-         vec3 color = mix(nightColor, dayColor.rgb, dayFactor);
-         gl_FragColor = vec4(color, 1.0);
-      }
-   </script>
-
-   <script id="atmosVertexShader" type="x-shader/x-vertex">
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-
-      void main() {
-         vNormal = normalize(normalMatrix * normal);
-         vPosition = (modelViewMatrix * vec4(position, 1.0)).xyz;
-         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-   </script>
-
-   <script id="atmosFragmentShader" type="x-shader/x-fragment">
-      uniform vec3 uSunDirection;
-
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-
-      void main() {
-         vec3 normal = normalize(vNormal);
-         vec3 viewDir = normalize(-vPosition);
-
-         float rim = 1.0 - max(dot(viewDir, normal), 0.0);
-         rim = pow(rim, 3.0);
-
-         float sunDot = max(dot(normal, normalize(uSunDirection)), 0.0);
-         float atmoIntensity = rim * (0.3 + 0.7 * sunDot);
-
-         vec3 atmoColor = vec3(0.3, 0.6, 1.0);
-         gl_FragColor = vec4(atmoColor, atmoIntensity * 0.6);
-      }
-   </script>
+   <!-- Shaders are now inline in viewer/42gl.js -->
 
    <!-- Detect backend mode, then load app -->
    <script>

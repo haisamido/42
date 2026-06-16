@@ -8,7 +8,8 @@
 /**********************************************************************/
 /* SimStateSnapshot — flat struct readable from JS via HEAPF64.       */
 /* All fields are doubles for uniform memory layout.                  */
-/* Total: 16 doubles = 128 bytes starting at the returned pointer.    */
+/* Total: 31 doubles = 248 bytes starting at the returned pointer.    */
+/* Layout must stay in sync with SimWorker.js getState().             */
 typedef struct {
    double SimTime;        /* [0]  Current simulation time (sec)      */
    double PosN[3];        /* [1-3]  SC[0] pos in N frame (m)         */
@@ -17,6 +18,12 @@ typedef struct {
    double svn[3];         /* [11-13] Sun vector in N (unit)          */
    double Nlink_d;        /* [14] Number of comm links (as double)   */
    double Done;           /* [15] 1.0 if sim complete, else 0.0      */
+   /* --- expanded fields (parity with IPC state) --- */
+   double wn[3];          /* [16-18] Angular velocity in N (rad/s)   */
+   double svb[3];         /* [19-21] Sun vector in body frame (unit) */
+   double PosR[3];        /* [22-24] Pos wrt ref orbit in N (m)      */
+   double VelR[3];        /* [25-27] Vel wrt ref orbit in N (m/s)    */
+   double Hvb[3];         /* [28-30] Angular momentum in body (Nms)  */
 } SimStateSnapshot;
 
 static SimStateSnapshot State;
@@ -41,7 +48,7 @@ int sim_step(void)
 
 /**********************************************************************/
 /* Returns pointer to SimStateSnapshot struct in WASM linear memory.  */
-/* JS reads it via: new Float64Array(Module.HEAPF64.buffer, ptr, 16)  */
+/* JS reads it via: new Float64Array(Module.HEAPF64.buffer, ptr, 31)  */
 EMSCRIPTEN_KEEPALIVE
 double *sim_get_state(void)
 {
@@ -55,6 +62,11 @@ double *sim_get_state(void)
          State.PosN[i] = SC[0].PosN[i];
          State.VelN[i] = SC[0].VelN[i];
          State.svn[i]  = SC[0].svn[i];
+         State.wn[i]   = SC[0].wn[i];
+         State.svb[i]  = SC[0].svb[i];
+         State.PosR[i] = SC[0].PosR[i];
+         State.VelR[i] = SC[0].VelR[i];
+         State.Hvb[i]  = SC[0].Hvb[i];
       }
       for (i = 0; i < 4; i++) {
          State.qbn[i] = SC[0].qn[i];

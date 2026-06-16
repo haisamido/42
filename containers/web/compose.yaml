@@ -23,6 +23,7 @@ services:
       DEFAULTS_DIR: /app/defaults/InOut
     volumes:
       - "./wasm/sessions:/data/sessions"
+      - "../../World:/app/World:ro"
     restart: unless-stopped
 
   42-web-server:
@@ -39,8 +40,13 @@ services:
       PORT: 8043
       INOUT_DIR: /app/InOut
       MODEL_DIR: /app/Model
+      WORLD_DIR: /app/World
       BIN_42: /app/42
     volumes:
       - "../../InOut:/app/InOut"
       - "../../Model:/app/Model"
+      - "../../World:/app/World:ro"
+      - "./42/InOut:/app/overrides/InOut:ro"
+      - "./42/Model:/app/overrides/Model:ro"
+      - "./42/World:/app/overrides/World:ro"
     restart: unless-stopped

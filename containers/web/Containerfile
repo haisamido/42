@@ -64,6 +64,13 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 # Copy build context AFTER tool installs (changes here won't bust emsdk cache)
 COPY . /42/containers/web
 
+# Apply build-time source overrides (overlay custom patches over upstream 42)
+# Uses find to skip dotfiles (.gitkeep) and only copy real source files
+RUN if [ -d /42/containers/web/42/Source ] \
+    && [ -n "$(find /42/containers/web/42/Source -maxdepth 1 -name '*.c' -o -name '*.h' 2>/dev/null | head -1)" ]; then \
+       cp -rv /42/containers/web/42/Source/*.c /42/containers/web/42/Source/*.h /42/Source/ 2>/dev/null || true ; \
+    fi
+
 # Build 42 as WASM
 RUN cd /42/containers/web/wasm && bash build.sh
 
@@ -79,6 +86,12 @@ FROM fortytwo-base AS fortytwo-build-native
 
 # Copy build context (server.js, UI files needed in final image)
 COPY . /42/containers/web
+
+# Apply build-time source overrides (overlay custom patches over upstream 42)
+RUN if [ -d /42/containers/web/42/Source ] \
+    && [ -n "$(find /42/containers/web/42/Source -maxdepth 1 -name '*.c' -o -name '*.h' 2>/dev/null | head -1)" ]; then \
+       cp -rv /42/containers/web/42/Source/*.c /42/containers/web/42/Source/*.h /42/Source/ 2>/dev/null || true ; \
+    fi
 
 # Build 42 natively without GUI (headless server mode)
 # GUIFLAG= disables OpenGL/GLUT linking — no GL libraries needed
@@ -123,6 +136,7 @@ ENV PORT=8043
 ENV ROOT_DIR=/app
 ENV INOUT_DIR=/app/InOut
 ENV MODEL_DIR=/app/Model
+ENV WORLD_DIR=/app/World
 ENV BIN_42=/app/42
 
 # Install Node.js 24

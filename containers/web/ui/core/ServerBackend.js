@@ -160,6 +160,8 @@ export class ServerBackend {
             try {
                const data = JSON.parse(e.data);
                if (data.status === 'running') {
+                  /* Start file-based polling as fallback;
+                     IPC state arrives via SSE 'state' events if available */
                   this._startStatePoller();
                } else {
                   this._stopStatePoller();
@@ -168,6 +170,16 @@ export class ServerBackend {
                }
                this._emit({ type: 'STATUS', status: data.status });
             } catch (err) { /* ignore parse errors */ }
+         });
+
+         /* IPC-based state: server pushes parsed state via SSE */
+         this._eventSource.addEventListener('state', (e) => {
+            try {
+               const state = JSON.parse(e.data);
+               /* Stop polling — IPC is delivering state */
+               if (this._statePoller) this._stopStatePoller();
+               this._emit({ type: 'STATE', state });
+            } catch (err) { /* ignore */ }
          });
 
          this._eventSource.addEventListener('stdout', (e) => {
