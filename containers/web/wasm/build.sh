@@ -3,7 +3,7 @@
 # build.sh — Compile 42 to WebAssembly using Emscripten
 #
 # Usage:
-#   cd containers/web
+#   cd containers/web/wasm
 #   bash build.sh
 #
 # Requires: emcc (Emscripten) on PATH
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 OUT_DIR="${SCRIPT_DIR}/out"
 
 SRC="${ROOT_DIR}/Source"

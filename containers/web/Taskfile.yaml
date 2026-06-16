@@ -1,10 +1,11 @@
-# Taskfile.yaml — Build automation for 42 WASM Web UI
+# Taskfile.yaml — Build automation for 42 Web UI
 #
 # Usage:
 #   cd containers/web
-#   task build
-#   task up
-#   task logs
+#   task wasm:build   && task wasm:up       # WASM on :8042
+#   task server:build && task server:up     # Native on :8043
+#   task build                              # build both
+#   task up                                 # start both
 #
 # Requires: https://taskfile.dev
 
@@ -12,55 +13,123 @@ version: '3'
 
 vars:
   COMPOSE_FILE: '{{.TASKFILE_DIR}}/compose.yaml'
-  PORT: '{{.PORT | default "8042"}}'
 
 tasks:
-  build:
-    desc: Build 42-web container image
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} build 42-web
 
-  rebuild:
-    desc: Build 42-web container image from scratch (no cache)
+  # ---------------------------------------------------------------------------
+  # Both services
+  # ---------------------------------------------------------------------------
+
+  build:
+    desc: Build all container images
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web
+      - docker compose -f {{.COMPOSE_FILE}} build
 
   up:
-    desc: Start 42-web container
+    desc: Start all services
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} up -d 42-web
+      - docker compose -f {{.COMPOSE_FILE}} up -d
 
   down:
-    desc: Stop and remove 42-web container
+    desc: Stop and remove all services
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web
-
-  logs:
-    desc: Follow 42-web container logs
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} logs -f 42-web
-
-  clean:
-    desc: Remove 42-web container and image
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web
-      - docker rmi $(docker images -q '*/42-web' 2>/dev/null) 2>/dev/null || true
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs
 
   status:
     desc: Show container status
     cmds:
       - docker compose -f {{.COMPOSE_FILE}} ps
 
-  shell:
-    desc: Open a shell in the running 42-web container
+  # ---------------------------------------------------------------------------
+  # 42-web-wasm (WASM, client-side simulation, port 8042)
+  # ---------------------------------------------------------------------------
+
+  wasm:build:
+    desc: Build 42-web-wasm container image
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} exec 42-web /bin/sh
+      - docker compose -f {{.COMPOSE_FILE}} build 42-web-wasm
+
+  wasm:rebuild:
+    desc: Build 42-web-wasm from scratch (no cache)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web-wasm
+
+  wasm:up:
+    desc: Start 42-web-wasm container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d 42-web-wasm
+
+  wasm:down:
+    desc: Stop and remove 42-web-wasm container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web-wasm
+
+  wasm:logs:
+    desc: Follow 42-web-wasm container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f 42-web-wasm
+
+  wasm:shell:
+    desc: Open a shell in the running 42-web-wasm container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} exec 42-web-wasm /bin/sh
+
+  wasm:clean:
+    desc: Remove 42-web-wasm container and image
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web-wasm
+      - docker rmi $(docker images -q '*/42-web-wasm' 2>/dev/null) 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # 42-web-server (Native, server-side simulation, port 8043)
+  # ---------------------------------------------------------------------------
+
+  server:build:
+    desc: Build 42-web-server container image
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build 42-web-server
+
+  server:rebuild:
+    desc: Build 42-web-server from scratch (no cache)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build --no-cache 42-web-server
+
+  server:up:
+    desc: Start 42-web-server container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d 42-web-server
+
+  server:down:
+    desc: Stop and remove 42-web-server container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web-server
+
+  server:logs:
+    desc: Follow 42-web-server container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f 42-web-server
+
+  server:shell:
+    desc: Open a shell in the running 42-web-server container
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} exec 42-web-server /bin/sh
+
+  server:clean:
+    desc: Remove 42-web-server container and image
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} rm -fs 42-web-server
+      - docker rmi $(docker images -q '*/42-web-server' 2>/dev/null) 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Info
+  # ---------------------------------------------------------------------------
 
   services:message:
     desc: Show service access information
     silent: true
     cmds:
       - cmd: echo "---"
-      - cmd: echo "42 WASM Web UI"
-      - cmd: 'echo "  URL:  http://localhost:{{.PORT}}"'
+      - cmd: echo "42 Web UI"
+      - cmd: 'echo "  42-web-wasm   (WASM):   http://localhost:${WASM_PORT:-8042}"'
+      - cmd: 'echo "  42-web-server (Native): http://localhost:${WEB_PORT:-8043}"'
       - cmd: echo "---"

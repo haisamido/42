@@ -149,21 +149,41 @@
       }
    </script>
 
-   <!-- Load WASM module, then bootstrap app -->
+   <!-- Detect backend mode, then load app -->
    <script>
-      const wasmScript = document.createElement('script');
-      wasmScript.src = '../42.js';
-      wasmScript.onload = () => {
-         const appScript = document.createElement('script');
-         appScript.type = 'module';
-         appScript.src = 'main.js';
-         document.body.appendChild(appScript);
-      };
-      wasmScript.onerror = () => {
-         document.getElementById('console-output').innerHTML =
-            '<span class="err">Failed to load 42.wasm — is the WASM build complete?</span>';
-      };
-      document.body.appendChild(wasmScript);
+      function loadApp() {
+         var s = document.createElement('script');
+         s.type = 'module';
+         s.src = 'main.js';
+         document.body.appendChild(s);
+      }
+
+      function loadWasm() {
+         var s = document.createElement('script');
+         s.src = '../42.js';
+         s.onload = loadApp;
+         s.onerror = function() {
+            document.getElementById('console-output').innerHTML =
+               '<span class="err">Failed to load 42.wasm — is the WASM build complete?</span>';
+         };
+         document.body.appendChild(s);
+      }
+
+      /* Detect backend: server mode skips WASM, loads app directly */
+      fetch('/api/mode')
+         .then(function(r) { return r.ok ? r.json() : { mode: 'wasm' }; })
+         .then(function(data) {
+            window.__42_MODE = data.mode || 'wasm';
+            if (data.mode === 'server') {
+               loadApp();
+            } else {
+               loadWasm();
+            }
+         })
+         .catch(function() {
+            window.__42_MODE = 'wasm';
+            loadWasm();
+         });
    </script>
 </body>
 </html>

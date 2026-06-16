@@ -1,1 +1,4 @@
-sessions/*
+wasm/sessions/
+wasm/out/
+wasm/InOut/
+server/sessions/

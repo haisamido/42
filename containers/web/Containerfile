@@ -1,14 +1,17 @@
-# Containerfile — Multi-stage build for 42 WASM Web UI
+# Containerfile — Multi-stage build for 42 Web UI
 #
 # Stages:
-#   fortytwo-base       — Ubuntu with build tools, 42 cloned from git
-#   fortytwo-build-wasm — Emscripten SDK, compiles 42 to WASM
-#   fortytwo-web        — Minimal Node.js runtime serving built artifacts
+#   fortytwo-base         — Ubuntu with build tools, 42 cloned from git
+#   fortytwo-build-wasm   — Emscripten SDK, compiles 42 to WASM
+#   fortytwo-build-native — Compiles 42 natively
+#   fortytwo-web-wasm     — Node.js serving WASM artifacts   (42-web-wasm   :8042)
+#   fortytwo-web-server   — Native 42 + Node.js server       (42-web-server :8043)
 #
 # Usage:
-#   cd containers/web && docker compose build
-#   docker compose up -d
-#   open http://localhost:8042
+#   cd containers/web
+#   docker compose build
+#   docker compose up -d 42-web-wasm      # WASM on :8042
+#   docker compose up -d 42-web-server    # Native on :8043
 
 ARG EMSDK_VERSION=3.1.61
 ARG GIT_URL=https://github.com/ericstoneking/42.git
@@ -37,9 +40,6 @@ RUN sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/loc
 # Clone 42 from git
 RUN git clone --depth 1 -b ${GIT_BRANCH} ${GIT_URL} /42
 
-# Copy containers/web overlay from build context (shims, build.sh, ui, etc.)
-COPY . /42/containers/web
-
 WORKDIR /42
 
 ###############################################################################
@@ -48,7 +48,7 @@ FROM fortytwo-base AS fortytwo-build-wasm
 
 ARG EMSDK_VERSION
 
-# Install Emscripten SDK
+# Install Emscripten SDK (cached independently of build context changes)
 ENV EMSDK=/opt/emsdk
 RUN git clone https://github.com/emscripten-core/emsdk.git ${EMSDK} \
     && cd ${EMSDK} \
@@ -61,18 +61,36 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Build 42 as WASM
-RUN cd /42/containers/web && bash build.sh
+# Copy build context AFTER tool installs (changes here won't bust emsdk cache)
+COPY . /42/containers/web
 
-# Copy UI source files into the output directory
-RUN cp -r /42/containers/web/ui /42/containers/web/out/ui
+# Build 42 as WASM
+RUN cd /42/containers/web/wasm && bash build.sh
+
+# Copy shared UI source files into the output directory
+RUN cp -r /42/containers/web/ui /42/containers/web/wasm/out/ui
 
 # Record git commit for /version endpoint
-RUN cd /42 && git rev-parse --short HEAD > /42/containers/web/out/.git-commit 2>/dev/null || echo "unknown" > /42/containers/web/out/.git-commit
+RUN cd /42 && git rev-parse --short HEAD > /42/containers/web/wasm/out/.git-commit 2>/dev/null || echo "unknown" > /42/containers/web/wasm/out/.git-commit
 
 ###############################################################################
-FROM node:24-slim AS fortytwo-web
+FROM fortytwo-base AS fortytwo-build-native
 ###############################################################################
+
+# Copy build context (server.js, UI files needed in final image)
+COPY . /42/containers/web
+
+# Build 42 natively without GUI (headless server mode)
+# GUIFLAG= disables OpenGL/GLUT linking — no GL libraries needed
+RUN cd /42 && make GUIFLAG=
+
+# Record git commit
+RUN cd /42 && git rev-parse --short HEAD > /42/.git-commit 2>/dev/null || echo "unknown" > /42/.git-commit
+
+###############################################################################
+FROM node:24-slim AS fortytwo-web-wasm
+###############################################################################
+# WASM: simulation runs in the browser, server just serves files
 
 ENV PORT=8042
 ENV ROOT_DIR=/app
@@ -82,13 +100,50 @@ ENV DEFAULTS_DIR=/app/defaults/InOut
 # Default InOut/ files for populating new sessions
 COPY --from=fortytwo-build-wasm /42/InOut /app/defaults/InOut
 
-COPY --from=fortytwo-build-wasm /42/containers/web/out /app
-COPY --from=fortytwo-build-wasm /42/containers/web/server.js /app/server.js
+COPY --from=fortytwo-build-wasm /42/containers/web/wasm/out /app
+COPY --from=fortytwo-build-wasm /42/containers/web/wasm/server.js /app/server.js
 
 # Mount point for per-session directories
 RUN mkdir -p /data/sessions
 
 WORKDIR /app
 EXPOSE 8042
+
+CMD ["node", "server.js"]
+
+###############################################################################
+FROM ubuntu:26.04 AS fortytwo-web-server
+###############################################################################
+# Native: simulation runs server-side (headless), web UI is a thin client.
+# Uses Ubuntu (same as build stage) to match glibc version.
+
+SHELL ["/bin/bash", "-c"]
+
+ENV PORT=8043
+ENV ROOT_DIR=/app
+ENV INOUT_DIR=/app/InOut
+ENV MODEL_DIR=/app/Model
+ENV BIN_42=/app/42
+
+# Install Node.js 24
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# 42 binary (headless, no GUI)
+# InOut/ and Model/ are bind-mounted from the host at runtime
+COPY --from=fortytwo-build-native /42/42 /app/42
+COPY --from=fortytwo-build-native /42/.git-commit /app/.git-commit
+
+# Server
+COPY --from=fortytwo-build-native /42/containers/web/server/server.js /app/server.js
+
+# UI (shared with WASM variant)
+COPY --from=fortytwo-build-native /42/containers/web/ui /app/ui
+
+WORKDIR /app
+EXPOSE 8043
 
 CMD ["node", "server.js"]

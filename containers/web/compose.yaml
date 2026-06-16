@@ -1,30 +1,46 @@
-# compose.yaml — Docker Compose for 42 WASM Web UI
+# compose.yaml — Docker Compose for 42 Web UI
 #
 # Usage:
 #   cd containers/web
 #   docker compose build
-#   docker compose up -d
-#   open http://localhost:8042
-#
-# Each browser session gets its own directory under
-# ./sessions/<datetime>/<uuid>/InOut/ populated with default InOut/ files
-# on first access.
+#   docker compose up -d 42-web-wasm      # WASM on :8042
+#   docker compose up -d 42-web-server    # Native on :8043
 
 services:
-  42-web:
+  42-web-wasm:
     build:
       context: .
       dockerfile: Containerfile
-      target: fortytwo-web
+      target: fortytwo-web-wasm
       args:
         GIT_URL: https://github.com/ericstoneking/42.git
         GIT_BRANCH: master
     ports:
-      - "${PORT:-8042}:8042"
+      - "${WASM_PORT:-8042}:8042"
     environment:
       PORT: 8042
       SESSION_DIR: /data/sessions
       DEFAULTS_DIR: /app/defaults/InOut
     volumes:
-      - "./sessions:/data/sessions"
+      - "./wasm/sessions:/data/sessions"
+    restart: unless-stopped
+
+  42-web-server:
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: fortytwo-web-server
+      args:
+        GIT_URL: https://github.com/ericstoneking/42.git
+        GIT_BRANCH: master
+    ports:
+      - "${WEB_PORT:-8043}:8043"
+    environment:
+      PORT: 8043
+      INOUT_DIR: /app/InOut
+      MODEL_DIR: /app/Model
+      BIN_42: /app/42
+    volumes:
+      - "../../InOut:/app/InOut"
+      - "../../Model:/app/Model"
     restart: unless-stopped

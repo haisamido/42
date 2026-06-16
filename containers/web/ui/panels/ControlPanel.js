@@ -14,6 +14,8 @@ export class ControlPanel {
       this.status = 'loading';
       this._stepsPerBatch = 100;
       this.onReset = null;
+      this.onRun = null;
+      this.serverMode = (window.__42_MODE === 'server');
 
       this._bind();
    }
@@ -34,10 +36,14 @@ export class ControlPanel {
       });
 
       this.btnRun?.addEventListener('click', () => {
-         this.worker.postMessage({
-            type: 'RUN',
-            stepsPerBatch: this._stepsPerBatch,
-         });
+         if (this.onRun) {
+            this.onRun();
+         } else {
+            this.worker.postMessage({
+               type: 'RUN',
+               stepsPerBatch: this._stepsPerBatch,
+            });
+         }
       });
 
       this.btnPause?.addEventListener('click', () => {
@@ -91,7 +97,7 @@ export class ControlPanel {
       this.btnReset.disabled = status === 'loading';
 
       if (isDone) {
-         this.btnRun.disabled = true;
+         this.btnRun.disabled = false;
          this.btnStep.disabled = true;
          this.btnPause.disabled = true;
       }

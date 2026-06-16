@@ -15,6 +15,12 @@ import { ConsolePanel, SimConfigPanel } from './panels/ConfigPanel.js';
 import { FileBrowser } from './panels/FileBrowser.js';
 import { FileEditor } from './panels/FileEditor.js';
 import { ServerSync } from './core/ServerSync.js';
+import { ServerBackend } from './core/ServerBackend.js';
+
+/* ------------------------------------------------------------------ */
+/* Backend mode: 'wasm' (client-side) or 'server' (native)            */
+/* ------------------------------------------------------------------ */
+const BACKEND_MODE = window.__42_MODE || 'wasm';
 
 /* ------------------------------------------------------------------ */
 /* Session ID                                                          */
@@ -45,9 +51,9 @@ const SESSION_TS = (() => {
 })();
 
 /* ------------------------------------------------------------------ */
-/* Service Worker                                                      */
+/* Service Worker (WASM mode only — caches .wasm/.data files)          */
 /* ------------------------------------------------------------------ */
-if ('serviceWorker' in navigator) {
+if (BACKEND_MODE === 'wasm' && 'serviceWorker' in navigator) {
    navigator.serviceWorker.register(`sw.js?sid=${SESSION_ID}&sts=${SESSION_TS}`)
       .then(reg => console.log('[SW] Registered:', reg.scope))
       .catch(err => console.warn('[SW] Registration failed:', err));
@@ -107,6 +113,7 @@ let worker = null;
 let stopTime = 10000;
 let pendingFileTab = null; /* { path } — waiting for FILES response */
 let pendingFlush = false;  /* true while flushing outputs to server */
+let autoRunAfterReady = false; /* set when re-running from 'done' in WASM mode */
 
 /* ------------------------------------------------------------------ */
 /* Server Sync (optional — active when InOut/ volume is mounted)       */
@@ -142,7 +149,7 @@ const simConfigPanel = new SimConfigPanel(document.getElementById('config-panel'
 const controlPanel = new ControlPanel(null);
 
 /* ------------------------------------------------------------------ */
-/* Worker lifecycle                                                    */
+/* Worker / ServerBackend lifecycle                                    */
 /* ------------------------------------------------------------------ */
 
 function createWorker() {
@@ -150,7 +157,11 @@ function createWorker() {
       worker.terminate();
    }
 
-   worker = new Worker('core/SimWorker.js');
+   if (BACKEND_MODE === 'server') {
+      worker = new ServerBackend();
+   } else {
+      worker = new Worker('core/SimWorker.js');
+   }
    controlPanel.setWorker(worker);
    fileBrowser.setWorker(worker);
 
@@ -173,10 +184,18 @@ function createWorker() {
                fileBrowser.setReady();
                /* Read stop time and dt */
                worker.postMessage({ type: 'GET_FILES', paths: ['/InOut/Inp_Sim.txt'] });
+               /* Auto-run if re-running from 'done' state */
+               if (autoRunAfterReady) {
+                  autoRunAfterReady = false;
+                  worker.postMessage({ type: 'RUN', stepsPerBatch: controlPanel._stepsPerBatch });
+               }
             }
             if (msg.status === 'done') {
                consolePanel.appendLine('[42] Simulation complete', 'info');
-               if (serverSync.available) {
+               if (BACKEND_MODE === 'server') {
+                  /* Refresh file browser to show output files written by 42 */
+                  fileBrowser.setReady();
+               } else if (serverSync.available) {
                   consolePanel.appendLine('[Server] Auto-flushing outputs to host...', 'info');
                   flushOutputs();
                }
@@ -293,8 +312,8 @@ function createFileEditorTab(path, content) {
    const editor = new FileEditor(path, content, {
       onSave: (p, c) => {
          worker.postMessage({ type: 'WRITE_FILE', path: p, content: c });
-         /* Dual-write to server if available */
-         if (serverSync.available) {
+         /* In WASM mode, dual-write to server if available */
+         if (BACKEND_MODE === 'wasm' && serverSync.available) {
             editor.setSyncStatus('syncing');
             serverSync.writeFile(serverSync.toRelPath(p), c).then(result => {
                editor.setSyncStatus(result.success ? 'synced' : 'error');
@@ -308,7 +327,7 @@ function createFileEditorTab(path, content) {
       },
       onSaveAndRun: (p, c) => {
          worker.postMessage({ type: 'WRITE_FILE', path: p, content: c });
-         if (serverSync.available) {
+         if (BACKEND_MODE === 'wasm' && serverSync.available) {
             serverSync.writeFile(serverSync.toRelPath(p), c);
          }
          consolePanel.appendLine('[42-web] Save & Run: resetting simulation...', 'info');
@@ -319,7 +338,9 @@ function createFileEditorTab(path, content) {
          }, 100);
       },
    });
-   if (!serverSync.available) {
+   if (BACKEND_MODE === 'server') {
+      editor.setSyncStatus('synced'); /* files are always on disk in server mode */
+   } else if (!serverSync.available) {
       editor.setSyncStatus('unavailable');
    }
 
@@ -332,6 +353,7 @@ function createFileEditorTab(path, content) {
 
 function parseSimConfig(text) {
    const lines = text.split('\n');
+   let dtSim = null;
    for (const line of lines) {
       /* Look for STOPTIME - typical 42 format has values before labels */
       if (/STOPTIME/i.test(line)) {
@@ -340,7 +362,19 @@ function parseSimConfig(text) {
             stopTime = parseFloat(match[1]);
          }
       }
+      /* Look for DTSIM or TIMESTEP */
+      if (/DTSIM|TIMESTEP/i.test(line)) {
+         const match = line.match(/([\d.eE+-]+)/);
+         if (match) {
+            dtSim = parseFloat(match[1]);
+         }
+      }
    }
+   /* Update Config panel immediately with parsed values */
+   const stopEl = document.querySelector('#cfg-stoptime');
+   if (stopEl && stopTime > 0) stopEl.value = stopTime.toFixed(0) + ' sec';
+   const dtEl = document.querySelector('#cfg-dtsim');
+   if (dtEl && dtSim != null) dtEl.value = dtSim + ' sec';
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,6 +394,28 @@ controlPanel.onReset = () => {
    consolePanel.appendLine('[42-web] Resetting simulation...', 'info');
    resetSimulation();
    consolePanel.appendLine('[42-web] Worker restarted. Click Init to begin.', 'info');
+};
+
+controlPanel.onRun = () => {
+   if (controlPanel.status === 'done') {
+      if (BACKEND_MODE === 'wasm') {
+         /* WASM: re-init in-place (reuses compiled module + MEMFS) */
+         consolePanel.appendLine('[42-web] Re-initializing for new run...', 'info');
+         trail.clear();
+         scView.setVisible(false);
+         statePanel.update(null, 0);
+         autoRunAfterReady = true;
+         worker.postMessage({ type: 'REINIT' });
+      } else {
+         /* Server: just start again (server kills old process) */
+         trail.clear();
+         scView.setVisible(false);
+         statePanel.update(null, 0);
+         worker.postMessage({ type: 'RUN', stepsPerBatch: controlPanel._stepsPerBatch });
+      }
+   } else {
+      worker.postMessage({ type: 'RUN', stepsPerBatch: controlPanel._stepsPerBatch });
+   }
 };
 
 /* ------------------------------------------------------------------ */
@@ -409,21 +465,33 @@ function flushOutputs() {
 /* ------------------------------------------------------------------ */
 createWorker();
 controlPanel.setStatus('loading');
-consolePanel.appendLine('[42-web] UI loaded, waiting for WASM initialization...', 'info');
+consolePanel.appendLine(`[42-web] Mode: ${BACKEND_MODE}`, 'info');
 consolePanel.appendLine(`[42-web] Session Date Time: ${SESSION_TS}`, 'info');
 consolePanel.appendLine(`[42-web] Session: ${SESSION_ID}`, 'info');
 
-/* Check server sync availability */
-serverSync.checkAvailability().then(available => {
-   if (available) {
-      updateSyncIndicator('sync-on');
-      if (flushBtn) flushBtn.disabled = false;
-      consolePanel.appendLine('[Server] InOut/ volume mounted — server sync enabled', 'info');
-   } else {
-      updateSyncIndicator('sync-off');
-      consolePanel.appendLine('[Server] No InOut/ volume mounted — MEMFS only', 'info');
-   }
-});
+if (BACKEND_MODE === 'server') {
+   /* Server mode: files on disk, auto-connect, no flush needed */
+   consolePanel.appendLine('[42-web] Connecting to server backend...', 'info');
+   updateSyncIndicator('sync-on');
+   if (flushBtn) flushBtn.style.display = 'none';
+   const resetBtn = document.getElementById('btn-reset');
+   if (resetBtn) resetBtn.style.display = 'none';
+   worker.postMessage({ type: 'INIT' });
+} else {
+   /* WASM mode: wait for user to click Init */
+   consolePanel.appendLine('[42-web] UI loaded, waiting for WASM initialization...', 'info');
+   /* Check server sync availability */
+   serverSync.checkAvailability().then(available => {
+      if (available) {
+         updateSyncIndicator('sync-on');
+         if (flushBtn) flushBtn.disabled = false;
+         consolePanel.appendLine('[Server] InOut/ volume mounted — server sync enabled', 'info');
+      } else {
+         updateSyncIndicator('sync-off');
+         consolePanel.appendLine('[Server] No InOut/ volume mounted — MEMFS only', 'info');
+      }
+   });
+}
 
 /* ================================================================== */
 /* Helper: Left panel tab switching                                    */
@@ -526,7 +594,7 @@ function showSamplesDialog() {
    dialogEl.innerHTML = `
       <h2>Load Sample Configuration</h2>
       <p style="color:var(--subtext0);margin-bottom:12px;">
-         Select an input file from MEMFS to open in the editor.
+         Select an input file to open in the editor.
       </p>
       <div id="sample-list" style="max-height:300px;overflow-y:auto;">
          <div style="color:var(--subtext0);padding:12px;">Loading file list...</div>

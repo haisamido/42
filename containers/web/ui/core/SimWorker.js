@@ -5,6 +5,7 @@
  *
  * Main → Worker:
  *   { type: 'INIT' }                    — Load WASM and initialize simulation
+ *   { type: 'REINIT' }                  — Re-initialize sim in-place (no reload)
  *   { type: 'RUN',  stepsPerBatch: N }  — Run N steps per batch, post state
  *   { type: 'PAUSE' }                   — Pause simulation
  *   { type: 'STEP' }                    — Single step
@@ -133,6 +134,18 @@ self.onmessage = async function (e) {
             await init();
          } catch (err) {
             self.postMessage({ type: 'STDERR', text: 'Init failed: ' + err.message });
+            postStatus('error');
+         }
+         break;
+
+      case 'REINIT':
+         if (!mod) return;
+         try {
+            running = false;
+            mod._sim_init();
+            postStatus('ready');
+         } catch (err) {
+            self.postMessage({ type: 'STDERR', text: 'Reinit failed: ' + err.message });
             postStatus('error');
          }
          break;
