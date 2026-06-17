@@ -8,17 +8,17 @@ const fs   = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const PORT       = parseInt(process.env.PORT || '8043', 10);
-const ROOT_DIR   = process.env.ROOT_DIR   || path.join(__dirname);
-const MODEL_DIR  = process.env.MODEL_DIR  || path.join(ROOT_DIR, 'Model');
-const WORLD_DIR  = process.env.WORLD_DIR  || path.join(ROOT_DIR, 'World');
-const BIN_42     = process.env.BIN_42     || path.join(ROOT_DIR, '42');
+const PORT         = parseInt(process.env.PORT || '8043', 10);
+const ROOT_DIR     = process.env.ROOT_DIR     || path.join(__dirname);
+const MODEL_DIR    = process.env.MODEL_DIR    || path.join(ROOT_DIR, 'Model');
+const WORLD_DIR    = process.env.WORLD_DIR    || path.join(ROOT_DIR, 'World');
+const BIN_42       = process.env.BIN_42       || path.join(ROOT_DIR, '42');
 const OVERRIDE_DIR = process.env.OVERRIDE_DIR || path.join(ROOT_DIR, 'overrides');
 const SAMPLES_DIR  = process.env.SAMPLES_DIR  || path.join(ROOT_DIR, 'samples');
 const SESSION_DIR  = process.env.SESSION_DIR  || path.join(__dirname, 'sessions');
 
 /* Session: each server start gets a unique working directory */
-const SESSION_ID = (() => {
+const SESSION_ID   = (() => {
    const d = new Date();
    const p = (n, w) => String(n).padStart(w, '0');
    return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1,2)}-${p(d.getUTCDate(),2)}`
@@ -70,7 +70,7 @@ function logReq(req, status, size) {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-const MAX_SINGLE = 10 * 1024 * 1024;
+const MAX_SINGLE   = 10 * 1024 * 1024;  /* 10 MB single file */
 
 /** Allowed top-level directories under ROOT_DIR for the file API. */
 const ALLOWED_ROOTS = ['InOut', 'Model', 'World'];

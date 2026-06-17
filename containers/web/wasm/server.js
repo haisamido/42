@@ -1,7 +1,7 @@
-/*    server.js — Static file server for 42 WASM Web UI                  */
-/*    Serves WASM artifacts and UI files with proper MIME types.         */
-/*    Optional REST API for server-side file sync when InOut/ is mounted.*/
-/*    Modeled after gmat-ui/web/server.js.                               */
+/*    server.js — WASM 42 server for the web UI                          */
+/*    Serves WASM artifacts, UI files, and World/Model textures.         */
+/*    Optional REST API for server-side file sync when sessions mounted. */
+/*    Port 8042 by default.                                              */
 
 const http = require('http');
 const fs   = require('fs');
@@ -9,10 +9,10 @@ const path = require('path');
 
 const PORT         = parseInt(process.env.PORT || '8042', 10);
 const ROOT_DIR     = process.env.ROOT_DIR     || path.join(__dirname);
+const MODEL_DIR    = process.env.MODEL_DIR    || path.join(ROOT_DIR, '..', 'Model');
+const WORLD_DIR    = process.env.WORLD_DIR    || path.join(ROOT_DIR, '..', 'World');
 const SESSION_DIR  = process.env.SESSION_DIR  || path.join(__dirname, 'sessions');
 const DEFAULTS_DIR = process.env.DEFAULTS_DIR || path.join(__dirname, 'defaults', 'InOut');
-const WORLD_DIR    = process.env.WORLD_DIR    || path.join(ROOT_DIR, '..', 'World');
-const MODEL_DIR    = process.env.MODEL_DIR    || path.join(ROOT_DIR, '..', 'Model');
 
 /* Ensure session root directory exists */
 let serverSyncAvailable = false;
@@ -27,25 +27,28 @@ try {
    GIT_COMMIT = fs.readFileSync(path.join(ROOT_DIR, '.git-commit'), 'utf8').trim();
 } catch (e) { /* ignore */ }
 
-/* MIME type map — includes WASM-specific types */
+/* MIME type map */
 const MIME = {
+   /* Shared with server/server.js */
    '.html':  'text/html; charset=utf-8',
    '.css':   'text/css; charset=utf-8',
    '.js':    'application/javascript; charset=utf-8',
-   '.mjs':   'application/javascript; charset=utf-8',
    '.json':  'application/json; charset=utf-8',
-   '.wasm':  'application/wasm',
-   '.data':  'application/octet-stream',
    '.png':   'image/png',
    '.jpg':   'image/jpeg',
    '.svg':   'image/svg+xml',
    '.ico':   'image/x-icon',
    '.txt':   'text/plain; charset=utf-8',
    '.csv':   'text/csv; charset=utf-8',
-   '.map':   'application/json',
    '.ppm':   'image/x-portable-pixmap',
+   '.pgm':   'image/x-portable-graymap',
    '.obj':   'text/plain; charset=utf-8',
    '.mtl':   'text/plain; charset=utf-8',
+   /* WASM-specific */
+   '.mjs':   'application/javascript; charset=utf-8',
+   '.wasm':  'application/wasm',
+   '.data':  'application/octet-stream',
+   '.map':   'application/json',
 };
 
 function getMime(filePath) {
@@ -57,15 +60,13 @@ function timestamp() {
 }
 
 function logReq(req, status, size) {
-   const ip = req.socket.remoteAddress || '-';
-   const sid = req.headers['x-session-id'] || '-';
    console.log(
-      `${timestamp()} ${ip} [${GIT_COMMIT} cli:${sid}] "${req.method} ${req.url}" ${status} ${size}`
+      `${timestamp()} "${req.method} ${req.url}" ${status} ${size}`
    );
 }
 
 /* ------------------------------------------------------------------ */
-/* File API helpers                                                    */
+/* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
 const MAX_SINGLE = 10 * 1024 * 1024;  /* 10 MB single file */
@@ -101,14 +102,17 @@ function isValidSessionId(sid) {
 }
 
 /** Recursively copy a directory. */
-function copyDirSync(src, dest) {
-   const entries = fs.readdirSync(src, { withFileTypes: true });
+function copyDirRecursive(src, dest) {
+   let entries;
+   try { entries = fs.readdirSync(src, { withFileTypes: true }); }
+   catch (e) { return; }
    for (const entry of entries) {
+      if (entry.name === '.gitkeep') continue;
       const srcPath  = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {
          fs.mkdirSync(destPath, { recursive: true });
-         copyDirSync(srcPath, destPath);
+         copyDirRecursive(srcPath, destPath);
       } else {
          fs.copyFileSync(srcPath, destPath);
       }
@@ -150,7 +154,7 @@ function getSessionInOutDir(sessionId, clientTs) {
    const sessionInOut = path.join(SESSION_DIR, ts, sessionId, 'InOut');
    fs.mkdirSync(sessionInOut, { recursive: true });
    if (fs.existsSync(DEFAULTS_DIR)) {
-      copyDirSync(DEFAULTS_DIR, sessionInOut);
+      copyDirRecursive(DEFAULTS_DIR, sessionInOut);
       console.log(`${timestamp()} Created session ${ts}/${sessionId} with defaults`);
    } else {
       console.log(`${timestamp()} Created session ${ts}/${sessionId} (no defaults available)`);
@@ -189,7 +193,7 @@ const server = http.createServer(async (req, res) => {
    const urlParams = new URL(req.url, `http://localhost:${PORT}`).searchParams;
 
    /* ============================================================== */
-   /* File API endpoints (/api/files/*)                               */
+   /* File API (/api/files/*)                                         */
    /* ============================================================== */
 
    if (urlPath.startsWith('/api/files/')) {
@@ -414,7 +418,7 @@ const server = http.createServer(async (req, res) => {
       return;
    }
 
-   /* Redirect / to /ui/ so relative asset paths resolve correctly */
+   /* Redirect / to /ui/ */
    if (urlPath === '/') {
       res.writeHead(302, { 'Location': '/ui/' });
       res.end();
@@ -469,7 +473,9 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
    console.log(`${timestamp()} 42-web server listening on http://0.0.0.0:${PORT}`);
    console.log(`${timestamp()} Serving: ${ROOT_DIR}`);
-   console.log(`${timestamp()} Git commit: ${GIT_COMMIT}`);
+   console.log(`${timestamp()} Model: ${MODEL_DIR}`);
+   console.log(`${timestamp()} World: ${WORLD_DIR}`);
    console.log(`${timestamp()} Session dir: ${SESSION_DIR} (sync ${serverSyncAvailable ? 'available' : 'unavailable'})`);
-   console.log(`${timestamp()} Defaults dir: ${DEFAULTS_DIR} (${fs.existsSync(DEFAULTS_DIR) ? 'found' : 'not found'})`);
+   console.log(`${timestamp()} Defaults: ${DEFAULTS_DIR} (${fs.existsSync(DEFAULTS_DIR) ? 'found' : 'not found'})`);
+   console.log(`${timestamp()} Git commit: ${GIT_COMMIT}`);
 });

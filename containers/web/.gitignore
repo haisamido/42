@@ -3,6 +3,7 @@ wasm/sessions/
 wasm/out/
 wasm/InOut/
 server/sessions/
+*.swp
 
 # 42/ override directory — user-specific, not committed
 # Only .gitkeep and README.md are tracked
