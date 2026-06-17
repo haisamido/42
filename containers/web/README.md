@@ -47,7 +47,8 @@ task rebuild                            # full rebuild both (no cache)
 | `42-web-wasm` | 8042 | Simulation runs client-side in the browser (WASM) |
 | `42-web-server` | 8043 | Simulation runs server-side natively, IPC state via SSE |
 
-Both services share the same UI (`ui/`) and mount `World/` for planet textures.
+Both services share the same UI (`ui/`) and mount `World/` and `Model/` read-only
+for planet textures and 3D models.
 
 Server mode uses 42's built-in IPC TCP sockets for real-time state streaming
 (configured via `Inp_IPC.txt` with SC and Orb prefixes). State is pushed to

@@ -11,6 +11,8 @@ const PORT         = parseInt(process.env.PORT || '8042', 10);
 const ROOT_DIR     = process.env.ROOT_DIR     || path.join(__dirname);
 const SESSION_DIR  = process.env.SESSION_DIR  || path.join(__dirname, 'sessions');
 const DEFAULTS_DIR = process.env.DEFAULTS_DIR || path.join(__dirname, 'defaults', 'InOut');
+const WORLD_DIR    = process.env.WORLD_DIR    || path.join(ROOT_DIR, '..', 'World');
+const MODEL_DIR    = process.env.MODEL_DIR    || path.join(ROOT_DIR, '..', 'Model');
 
 /* Ensure session root directory exists */
 let serverSyncAvailable = false;
@@ -41,6 +43,9 @@ const MIME = {
    '.txt':   'text/plain; charset=utf-8',
    '.csv':   'text/csv; charset=utf-8',
    '.map':   'application/json',
+   '.ppm':   'image/x-portable-pixmap',
+   '.obj':   'text/plain; charset=utf-8',
+   '.mtl':   'text/plain; charset=utf-8',
 };
 
 function getMime(filePath) {
@@ -198,6 +203,46 @@ const server = http.createServer(async (req, res) => {
             sessionDir: SESSION_DIR,
          });
          logReq(req, 200, size);
+         return;
+      }
+
+      /* GET /api/files/raw/<path> — serve World/ and Model/ as binary (no session required) */
+      if (urlPath.startsWith('/api/files/raw/') && req.method === 'GET') {
+         const relPath = urlPath.slice('/api/files/raw/'.length);
+         const top = relPath.split('/')[0];
+         const RAW_ROOTS = { World: WORLD_DIR, Model: MODEL_DIR };
+         const baseDir = RAW_ROOTS[top];
+         if (!baseDir) {
+            const size = sendJSON(res, 400, { error: 'Invalid path' });
+            logReq(req, 400, size);
+            return;
+         }
+         const subPath = relPath.slice(top.length + 1);
+         const filePath = safePath(subPath, baseDir);
+         if (!filePath) {
+            const size = sendJSON(res, 400, { error: 'Invalid path' });
+            logReq(req, 400, size);
+            return;
+         }
+         try {
+            const stat = fs.statSync(filePath);
+            if (!stat.isFile()) {
+               const size = sendJSON(res, 404, { error: 'Not a file' });
+               logReq(req, 404, size);
+               return;
+            }
+            const mime = getMime(filePath);
+            res.writeHead(200, {
+               'Content-Type': mime,
+               'Content-Length': stat.size,
+               'Cache-Control': 'public, max-age=3600',
+            });
+            fs.createReadStream(filePath).pipe(res);
+            logReq(req, 200, stat.size);
+         } catch (e) {
+            const size = sendJSON(res, 404, { error: 'File not found' });
+            logReq(req, 404, size);
+         }
          return;
       }
 

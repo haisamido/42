@@ -21,9 +21,12 @@ services:
       PORT: 8042
       SESSION_DIR: /data/sessions
       DEFAULTS_DIR: /app/defaults/InOut
+      WORLD_DIR: /app/World
+      MODEL_DIR: /app/Model
     volumes:
       - "./wasm/sessions:/data/sessions"
       - "../../World:/app/World:ro"
+      - "../../Model:/app/Model:ro"
     restart: unless-stopped
 
   42-web-server:
