@@ -318,6 +318,284 @@ SOCKET InitSocketClient(const char *hostname, int Port,int AllowBlocking)
       return(sockfd);
 #endif /* _WIN32 */
 }
+/**********************************************************************/
+void CloseSocket(SOCKET *sockfd)
+{
+#if defined(_WIN32)
+      if (*sockfd != INVALID_SOCKET) {
+         closesocket(*sockfd);
+         *sockfd = INVALID_SOCKET;
+      }
+#else
+      if (*sockfd >= 0) {
+         close(*sockfd);
+         *sockfd = -1;
+      }
+#endif
+}
+/**********************************************************************/
+SOCKET InitSocketServerNonBlocking(int Port)
+{
+#if defined(_WIN32)
+      WSADATA wsa;
+      SOCKET listenfd;
+      u_long NonBlock = 1;
+      struct sockaddr_in Server;
+      int opt = 1;
+
+      if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+         printf("Warning: WSAStartup failed in InitSocketServerNonBlocking.\n");
+         return INVALID_SOCKET;
+      }
+      listenfd = socket(AF_INET,SOCK_STREAM,0);
+      if (listenfd == INVALID_SOCKET) {
+         printf("Warning: socket() failed in InitSocketServerNonBlocking.\n");
+         return INVALID_SOCKET;
+      }
+      setsockopt(listenfd,SOL_SOCKET,SO_REUSEADDR,(const char *)&opt,sizeof(opt));
+      memset((char *) &Server,0,sizeof(Server));
+      Server.sin_family = AF_INET;
+      Server.sin_addr.s_addr = INADDR_ANY;
+      Server.sin_port = htons(Port);
+      if (bind(listenfd,(struct sockaddr *) &Server,sizeof(Server)) < 0) {
+         printf("Warning: bind() failed on port %d in InitSocketServerNonBlocking.\n",Port);
+         closesocket(listenfd);
+         return INVALID_SOCKET;
+      }
+      listen(listenfd,5);
+      ioctlsocket(listenfd,FIONBIO,&NonBlock);
+      printf("Server listening (non-blocking) on port %d\n",Port);
+      return listenfd;
+#else
+      SOCKET listenfd;
+      int flags;
+      struct sockaddr_in Server;
+      int opt = 1;
+
+      listenfd = socket(AF_INET,SOCK_STREAM,0);
+      if (listenfd < 0) {
+         printf("Warning: socket() failed in InitSocketServerNonBlocking.\n");
+         return -1;
+      }
+      if (setsockopt(listenfd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt)) == -1) {
+         printf("Warning: setsockopt() failed in InitSocketServerNonBlocking.\n");
+         close(listenfd);
+         return -1;
+      }
+      memset((char *) &Server,0,sizeof(Server));
+      Server.sin_family = AF_INET;
+      Server.sin_addr.s_addr = INADDR_ANY;
+      Server.sin_port = htons(Port);
+      if (bind(listenfd,(struct sockaddr *) &Server,sizeof(Server)) < 0) {
+         printf("Warning: bind() failed on port %d in InitSocketServerNonBlocking.\n",Port);
+         close(listenfd);
+         return -1;
+      }
+      listen(listenfd,5);
+      flags = fcntl(listenfd, F_GETFL, 0);
+      fcntl(listenfd, F_SETFL, flags | O_NONBLOCK);
+      printf("Server listening (non-blocking) on port %d\n",Port);
+      return listenfd;
+#endif
+}
+/**********************************************************************/
+SOCKET AcceptSocketNonBlocking(SOCKET ListenSocket, int AllowBlocking)
+{
+#if defined(_WIN32)
+      SOCKET sockfd;
+      u_long Blocking = 1;
+      int clilen;
+      struct sockaddr_in Client;
+      int DisableNagle = 1;
+
+      clilen = sizeof(Client);
+      sockfd = accept(ListenSocket,(struct sockaddr *) &Client,&clilen);
+      if (sockfd == INVALID_SOCKET) {
+         return INVALID_SOCKET;
+      }
+      /* Set blocking mode for data socket per config */
+      if (!AllowBlocking) {
+         ioctlsocket(sockfd,FIONBIO,&Blocking);
+      }
+      setsockopt(sockfd,IPPROTO_TCP,TCP_NODELAY,
+                 (const char *)&DisableNagle,sizeof(DisableNagle));
+      return sockfd;
+#else
+      SOCKET sockfd;
+      int flags;
+      socklen_t clilen;
+      struct sockaddr_in Client;
+      int DisableNagle = 1;
+
+      clilen = sizeof(Client);
+      sockfd = accept(ListenSocket,(struct sockaddr *) &Client,&clilen);
+      if (sockfd < 0) {
+         return -1;
+      }
+      /* Set blocking mode for data socket per config */
+      if (!AllowBlocking) {
+         flags = fcntl(sockfd, F_GETFL, 0);
+         fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+      }
+      setsockopt(sockfd,IPPROTO_TCP,TCP_NODELAY,&DisableNagle,sizeof(DisableNagle));
+      return sockfd;
+#endif
+}
+/**********************************************************************/
+SOCKET InitSocketClientNonBlocking(const char *hostname, int Port,
+                                   int AllowBlocking)
+{
+#if defined(_WIN32)
+      WSADATA wsa;
+      SOCKET sockfd;
+      u_long NonBlock = 1;
+      u_long Blocking = 1;
+      struct sockaddr_in Server;
+      struct hostent *Host;
+      int err;
+      int DisableNagle = 1;
+
+      if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+         return INVALID_SOCKET;
+      }
+      sockfd = socket(AF_INET,SOCK_STREAM,0);
+      if (sockfd == INVALID_SOCKET) {
+         return INVALID_SOCKET;
+      }
+      Host = gethostbyname(hostname);
+      if (Host == NULL) {
+         closesocket(sockfd);
+         return INVALID_SOCKET;
+      }
+      memset((char *) &Server,0,sizeof(Server));
+      Server.sin_family = AF_INET;
+      memcpy((char *)&Server.sin_addr.s_addr,(char *)Host->h_addr_list[0],
+         Host->h_length);
+      Server.sin_port = htons(Port);
+      /* Set non-blocking for connect attempt */
+      ioctlsocket(sockfd,FIONBIO,&NonBlock);
+      if (connect(sockfd,(struct sockaddr *) &Server,sizeof(Server)) == 0) {
+         /* Immediate success */
+         if (AllowBlocking) {
+            NonBlock = 0;
+            ioctlsocket(sockfd,FIONBIO,&NonBlock);
+         }
+         setsockopt(sockfd,IPPROTO_TCP,TCP_NODELAY,
+                    (const char *)&DisableNagle,sizeof(DisableNagle));
+         return sockfd;
+      }
+      err = WSAGetLastError();
+      if (err == WSAEWOULDBLOCK) {
+         /* Connection in progress — return fd for later completion check */
+         return sockfd;
+      }
+      closesocket(sockfd);
+      return INVALID_SOCKET;
+#else
+      SOCKET sockfd;
+      int flags;
+      struct sockaddr_in Server;
+      struct hostent *Host;
+      int DisableNagle = 1;
+
+      sockfd = socket(AF_INET,SOCK_STREAM,0);
+      if (sockfd < 0) {
+         return -1;
+      }
+      Host = gethostbyname(hostname);
+      if (Host == NULL) {
+         close(sockfd);
+         return -1;
+      }
+      memset((char *) &Server,0,sizeof(Server));
+      Server.sin_family = AF_INET;
+      memcpy((char *)&Server.sin_addr.s_addr,(char *)Host->h_addr_list[0],
+         Host->h_length);
+      Server.sin_port = htons(Port);
+      /* Set non-blocking for connect attempt */
+      flags = fcntl(sockfd, F_GETFL, 0);
+      fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+      if (connect(sockfd,(struct sockaddr *) &Server,sizeof(Server)) == 0) {
+         /* Immediate success — adjust blocking mode */
+         if (AllowBlocking) {
+            fcntl(sockfd, F_SETFL, flags); /* Restore blocking */
+         }
+         setsockopt(sockfd,IPPROTO_TCP,TCP_NODELAY,&DisableNagle,sizeof(DisableNagle));
+         return sockfd;
+      }
+      if (errno == EINPROGRESS) {
+         /* Connection in progress — return fd for later completion check */
+         return sockfd;
+      }
+      close(sockfd);
+      return -1;
+#endif
+}
+
+/**********************************************************************/
+int CheckSocketConnected(SOCKET sockfd, int AllowBlocking)
+{
+#if defined(_WIN32)
+      fd_set writefds, exceptfds;
+      struct timeval tv = {0, 0};
+      int err;
+      int len = sizeof(err);
+      u_long NonBlock;
+      int DisableNagle = 1;
+      int rc;
+
+      FD_ZERO(&writefds);
+      FD_SET(sockfd, &writefds);
+      FD_ZERO(&exceptfds);
+      FD_SET(sockfd, &exceptfds);
+
+      rc = select(0, NULL, &writefds, &exceptfds, &tv);
+      if (rc == 0) return 0;  /* Still in progress */
+      if (rc < 0) return -1;  /* select() failed */
+
+      if (FD_ISSET(sockfd, &exceptfds)) return -1;
+
+      if (FD_ISSET(sockfd, &writefds)) {
+         getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
+         if (err != 0) return -1;
+         if (AllowBlocking) {
+            NonBlock = 0;
+            ioctlsocket(sockfd, FIONBIO, &NonBlock);
+         }
+         setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY,
+                    (const char *)&DisableNagle, sizeof(DisableNagle));
+         return 1;  /* Connected */
+      }
+      return 0;
+#else
+      fd_set writefds;
+      struct timeval tv = {0, 0};
+      int err = 0;
+      socklen_t len = sizeof(err);
+      int DisableNagle = 1;
+      int rc;
+
+      FD_ZERO(&writefds);
+      FD_SET(sockfd, &writefds);
+
+      rc = select(sockfd + 1, NULL, &writefds, NULL, &tv);
+      if (rc == 0) return 0;  /* Still in progress */
+      if (rc < 0) return -1;  /* select() failed */
+
+      if (FD_ISSET(sockfd, &writefds)) {
+         getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
+         if (err != 0) return -1;
+         if (AllowBlocking) {
+            int flags = fcntl(sockfd, F_GETFL, 0);
+            fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+         }
+         setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY,
+                    &DisableNagle, sizeof(DisableNagle));
+         return 1;  /* Connected */
+      }
+      return 0;
+#endif
+}
 
 /* #ifdef __cplusplus
 ** }

@@ -50,6 +50,11 @@ double *PpmToPsf(const char *path, const char *filename,
 
 SOCKET InitSocketServer(int Port, int AllowBlocking);
 SOCKET InitSocketClient(const char *hostname, int Port, int AllowBlocking);
+SOCKET InitSocketServerNonBlocking(int Port);
+SOCKET AcceptSocketNonBlocking(SOCKET ListenSocket, int AllowBlocking);
+SOCKET InitSocketClientNonBlocking(const char *hostname, int Port, int AllowBlocking);
+void CloseSocket(SOCKET *sockfd);
+int CheckSocketConnected(SOCKET sockfd, int AllowBlocking);
 
 /*
 ** #ifdef __cplusplus

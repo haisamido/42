@@ -704,6 +704,11 @@ struct IpcType {
    FILE *File;
    long Nprefix;
    char **Prefix;
+   /* --- Resilient IPC fields --- */
+   long PollingEnabled;    /* FALSE=legacy blocking, TRUE=non-blocking poll */
+   long Connected;         /* Runtime: TRUE=socket live, FALSE=pending      */
+   SOCKET ListenSocket;    /* SERVER: persist listen fd across reconnects   */
+   long ListenReady;       /* SERVER: TRUE if bind/listen succeeded         */
 };
 
 struct SCType {

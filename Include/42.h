@@ -154,6 +154,7 @@ EXTERN long EndCFD;
 /* Inter-Process Comm */
 EXTERN long Nipc;
 EXTERN struct IpcType *IPC;
+void CleanupInterProcessComm(void);
 
 /* Master Random Process */
 EXTERN struct RandomProcessType *RNG;

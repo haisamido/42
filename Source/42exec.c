@@ -412,6 +412,7 @@ int exec(int argc,char **argv)
       InitSim(argc,argv);
       CmdInterpreter();
       InitInterProcessComm();
+      atexit(CleanupInterProcessComm);
       #ifdef _ENABLE_GUI_
          if (GLEnable) {
             HandoffToGui(argc,argv);

@@ -500,8 +500,8 @@ void WriteToSocket(SOCKET Socket,  char **Prefix, long Nprefix, long EchoEnabled
 
       Success = write(Socket,Msg,MsgLen);
       if (Success < 0) {
-         printf("Error writing to socket in WriteToSocket.\n");
-         exit(1);
+         printf("Warning: write failed in WriteToSocket (errno=%d).\n", errno);
+         return;
       }
       read(Socket,Ack,4);
 
@@ -528,9 +528,9 @@ void ReadFromSocket(SOCKET Socket, long EchoEnabled)
       long k;
 
       NumBytes = read(Socket,Msg,16384);
-      if (NumBytes < 0) {
-         printf("Error reading from socket in ReadFromSocket.\n");
-         exit(1);
+      if (NumBytes <= 0) {
+         printf("Warning: read failed in ReadFromSocket (errno=%d).\n", errno);
+         return;
       }
       write(Socket,Ack,4);
 
