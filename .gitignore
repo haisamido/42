@@ -9,3 +9,5 @@ a.out
 42
 42.exe
 *.ipynb_checkpoints
+containers/web/server/sessions/
+containers/web/wasm/sessions/
