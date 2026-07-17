@@ -58,6 +58,7 @@ static int IpcWriteToSocket(struct IpcType *I, long Iipc)
          IpcDisconnect(I,Iipc);
          return -1;
       }
+      printf("IPC[%ld] TX %s:%ld\n",Iipc,I->HostName,I->Port);
       WriteToSocket(I->Socket,I->Prefix,I->Nprefix,I->EchoEnabled);
       if (getsockopt(I->Socket,SOL_SOCKET,SO_ERROR,(char *)&err,&len) < 0
           || err != 0) {
@@ -77,6 +78,7 @@ static int IpcReadFromSocket(struct IpcType *I, long Iipc)
          IpcDisconnect(I,Iipc);
          return -1;
       }
+      printf("IPC[%ld] RX %s:%ld\n",Iipc,I->HostName,I->Port);
       ReadFromSocket(I->Socket,I->EchoEnabled);
       if (getsockopt(I->Socket,SOL_SOCKET,SO_ERROR,(char *)&err,&len) < 0
           || err != 0) {

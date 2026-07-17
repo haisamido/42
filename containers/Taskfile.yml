@@ -1,0 +1,137 @@
+version: "3"
+
+vars:
+  ROOT_DIR:
+    sh: cd .. && pwd
+  BIN: "{{.ROOT_DIR}}/42"
+  SOCKETS_DIR: "{{.ROOT_DIR}}/containers/Sockets"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build 42
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - make
+
+  clean:
+    desc: Clean build artifacts
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - make clean
+
+  rebuild:
+    desc: Clean and rebuild 42
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - make clean
+      - make
+
+  # ---------------------------------------------------------------------------
+  # All-in-one: single TX (5 ports) + single RX (5 ports)
+  # ---------------------------------------------------------------------------
+  tx:
+    desc: "Start TX server (all 5 ports: 10001-10005)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx/"
+
+  rx:
+    desc: "Start RX client (all 5 ports: 10001-10005)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx/"
+
+  tx-rx:
+    desc: "Start TX server, then RX client (all 5 ports)"
+    deps: [build]
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx/ &"
+      - sleep 3
+      - "{{.BIN}} containers/Sockets/Rx/"
+
+  # ---------------------------------------------------------------------------
+  # Individual TX servers (one port each)
+  # ---------------------------------------------------------------------------
+  tx1:
+    desc: "Start TX server on localhost:10001 (SC)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx1/"
+
+  tx2:
+    desc: "Start TX server on 127.0.0.1:10002 (Orb)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx2/"
+
+  tx3:
+    desc: "Start TX server on 0.0.0.0:10003 (World)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx3/"
+
+  tx4:
+    desc: "Start TX server on localhost:10004 (CommLink)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx4/"
+
+  tx5:
+    desc: "Start TX server on 127.0.0.1:10005 (SC[0].AC + SC[0].B[0])"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Tx5/"
+
+  # ---------------------------------------------------------------------------
+  # Individual RX clients (one port each)
+  # ---------------------------------------------------------------------------
+  rx1:
+    desc: "Start RX client on localhost:10001 (SC)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx1/"
+
+  rx2:
+    desc: "Start RX client on 127.0.0.1:10002 (Orb)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx2/"
+
+  rx3:
+    desc: "Start RX client on localhost:10003 (World)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx3/"
+
+  rx4:
+    desc: "Start RX client on localhost:10004 (CommLink)"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx4/"
+
+  rx5:
+    desc: "Start RX client on 127.0.0.1:10005 (SC[0].AC + SC[0].B[0])"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - "{{.BIN}} containers/Sockets/Rx5/"
+
+  # ---------------------------------------------------------------------------
+  # Kill
+  # ---------------------------------------------------------------------------
+  kill:
+    desc: Kill all running 42 processes
+    cmds:
+      - pkill -f "./42 containers/Sockets" || true
+      - pkill -f "42 containers/Sockets" || true
+      - echo "All socket test processes killed"
+
+  status:
+    desc: Show running 42 socket test processes
+    cmds:
+      - ps aux | grep "[4]2 containers/Sockets" || echo "No socket test processes running"
